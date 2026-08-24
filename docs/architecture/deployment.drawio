@@ -1,0 +1,102 @@
+<mxfile host="Electron">
+  <diagram id="deploy" name="Deployment">
+    <mxGraphModel dx="1538" dy="901" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="users" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#ffffff;strokeColor=none;" value="&lt;b&gt;Пользователи&lt;/b&gt;&lt;br&gt;(браузер)" vertex="1">
+          <mxGeometry height="70" width="140" x="40" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="dmz" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=13;" value="DMZ (демилитаризованная зона)" vertex="1">
+          <mxGeometry height="480" width="440" x="40" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="traefik" parent="dmz" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168BD;strokeColor=#0B4884;fontColor=#ffffff;" value="&lt;b&gt;Traefik v3&lt;/b&gt;&lt;br&gt;API Gateway / Load Balancer&lt;br&gt;TLS · rate-limit /auth/login&lt;br&gt;маршруты: / · /api · /docs · UI наблюдения" vertex="1">
+          <mxGeometry height="105" width="220" x="35" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="fe" parent="dmz" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;strokeColor=#2E6DA4;fontColor=#ffffff;" value="&lt;b&gt;Frontend&lt;/b&gt;&lt;br&gt;nginx: static React SPA" vertex="1">
+          <mxGeometry height="70" width="130" x="285" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="dmznote" parent="dmz" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;" value="Балансировка: 2 реплики backend за Traefik (round-robin).&lt;br&gt;UI Jaeger/Grafana/Neo4j Browser публикуются через поддомены Traefik." vertex="1">
+          <mxGeometry height="50" width="380" x="35" y="175" as="geometry" />
+        </mxCell>
+        <mxCell id="internal" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#82B366;verticalAlign=top;fontStyle=1;fontSize=13;" value="Internal zone (доверенная)" vertex="1">
+          <mxGeometry height="480" width="600" x="520" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="vault" parent="internal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="&lt;b&gt;Vault&lt;/b&gt;&lt;br&gt;dev-mode: секреты&lt;br&gt;(JWT key, пароли БД)" vertex="1">
+          <mxGeometry height="80" width="160" x="30" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" parent="internal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168BD;strokeColor=#0B4884;fontColor=#ffffff;" value="&lt;b&gt;Backend #1&lt;/b&gt;&lt;br&gt;FastAPI + LangGraph&lt;br&gt;(реплика 1)" vertex="1">
+          <mxGeometry height="80" width="170" x="215" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="internal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168BD;strokeColor=#0B4884;fontColor=#ffffff;" value="&lt;b&gt;Backend #2&lt;/b&gt;&lt;br&gt;FastAPI + LangGraph&lt;br&gt;(реплика 2)" vertex="1">
+          <mxGeometry height="80" width="170" x="405" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="pg" parent="internal" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#D5E8D4;strokeColor=#82B366;" value="&lt;b&gt;PostgreSQL 16&lt;/b&gt;&lt;br&gt;RBAC · сессии · аудит" vertex="1">
+          <mxGeometry height="85" width="160" x="30" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="qd" parent="internal" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#D5E8D4;strokeColor=#82B366;" value="&lt;b&gt;Qdrant&lt;/b&gt;&lt;br&gt;векторы чанков" vertex="1">
+          <mxGeometry height="85" width="160" x="220" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="nj" parent="internal" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#D5E8D4;strokeColor=#82B366;" value="&lt;b&gt;Neo4j Community&lt;/b&gt;&lt;br&gt;граф знаний" vertex="1">
+          <mxGeometry height="85" width="160" x="410" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="obsbox" parent="internal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="&lt;b&gt;Наблюдаемость:&lt;/b&gt; otel-collector · Jaeger · Prometheus · Grafana (provisioned dashboards) · [Langfuse — внешний инстанс]" vertex="1">
+          <mxGeometry height="60" width="540" x="30" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="intnote" parent="internal" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;" value="Реплики backend используют одни хранилища.&lt;br&gt;Состояние агента (история сессий) — в PostgreSQL,&lt;br&gt;поэтому реплики stateless и горизонтально масштабируются." vertex="1">
+          <mxGeometry height="55" width="540" x="30" y="405" as="geometry" />
+        </mxCell>
+        <mxCell id="gpuzone" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C0392B;verticalAlign=top;fontStyle=1;fontSize=13;" value="GPU-зона (изоляция ресурсов)" vertex="1">
+          <mxGeometry height="480" width="360" x="1160" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="gpuhost" parent="gpuzone" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#C0392B;dashed=1;verticalAlign=top;whiteSpace=wrap;" value="GPU-хост&lt;br&gt;RTX 5070 Ti · 16GB VRAM · Blackwell sm_120 · CUDA ≥ 12.8" vertex="1">
+          <mxGeometry height="230" width="290" x="30" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="vllm" parent="gpuhost" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#FFFFFF;strokeColor=#C0392B;" value="&lt;b&gt;vLLM&lt;/b&gt;&lt;br&gt;Qwen3-8B-AWQ&lt;br&gt;OpenAI-compatible API :8000&lt;br&gt;max_model_len ≈ 8192" vertex="1">
+          <mxGeometry height="120" width="210" x="40" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="gpunote" parent="gpuzone" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;" value="Только vLLM занимает GPU.&lt;br&gt;Эмбеддер/реранкер — CPU в Internal (ADR-009)." vertex="1">
+          <mxGeometry height="50" width="290" x="30" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="d_ut" edge="1" parent="1" source="users" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" target="traefik" value="HTTPS :443">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d_tfe" edge="1" parent="1" source="traefik" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="fe" value="/">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d_tb1" edge="1" parent="1" source="traefik" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" target="b1" value="/api/*">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d_tb2" edge="1" parent="1" source="traefik" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0;" target="b2" value="/api/* (round-robin)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="500" y="120" />
+              <mxPoint x="500" y="145" />
+              <mxPoint x="1120" y="145" />
+              <mxPoint x="1120" y="128" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="d_b1v" edge="1" parent="1" source="b1" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="vllm" value="OpenAI SDK">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1140" y="295" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="d_vb" edge="1" parent="1" source="vault" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#D79B00;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="b1" value="secrets at boot">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d_bpg" edge="1" parent="1" source="b1" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" target="pg" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d_bqd" edge="1" parent="1" source="b1" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="qd" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d_bnj" edge="1" parent="1" source="b1" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" target="nj" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

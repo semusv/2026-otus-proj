@@ -1,0 +1,95 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="c4l3agent" name="C4 L3 Agent Component">
+    <mxGraphModel dx="1800" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="rt" value="Backend: Agent Runtime (LangGraph state machine) [компоненты агента по заданию]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#0B4884;verticalAlign=top;fontStyle=1;fontSize=14;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="40" width="1820" height="600" as="geometry"/>
+        </mxCell>
+        <mxCell id="gin" value="&lt;b&gt;Guardrail In&lt;/b&gt;&lt;br&gt;инъекции · PII · валидация схемы вопроса" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" vertex="1" parent="rt">
+          <mxGeometry x="30" y="220" width="160" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="planner" value="&lt;b&gt;Planner&lt;/b&gt;&lt;br&gt;выбор инструментов и стратегии,&lt;br&gt;учёт истории (Memory)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontStyle=1" vertex="1" parent="rt">
+          <mxGeometry x="240" y="220" width="170" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="tools" value="&lt;b&gt;Tools Interface&lt;/b&gt;&lt;br&gt;единый контракт инструментов&lt;br&gt;rag/tools.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="rt">
+          <mxGeometry x="460" y="220" width="160" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="vret" value="&lt;b&gt;Vector Retriever&lt;/b&gt;&lt;br&gt;Qdrant retrieve_vec&lt;br&gt;ACL pre-fetch filter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="rt">
+          <mxGeometry x="670" y="130" width="175" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="gexp" value="&lt;b&gt;Graph Expander&lt;/b&gt;&lt;br&gt;Neo4j expand_graph&lt;br&gt;Cypher 1–2 hop · WHERE clearance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="rt">
+          <mxGeometry x="670" y="310" width="175" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="fusion" value="&lt;b&gt;Fusion&lt;/b&gt;&lt;br&gt;слияние результатов&lt;br&gt;инструментов (RRF)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="rt">
+          <mxGeometry x="900" y="220" width="140" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="rerank" value="&lt;b&gt;Reranker&lt;/b&gt;&lt;br&gt;bge-reranker-v2-m3&lt;br&gt;(CPU cross-encoder)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;" vertex="1" parent="rt">
+          <mxGeometry x="1090" y="220" width="150" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="gen" value="&lt;b&gt;Generator&lt;/b&gt;&lt;br&gt;vLLM client (OpenAI SDK)&lt;br&gt;SSE-стриминг токенов" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;" vertex="1" parent="rt">
+          <mxGeometry x="1290" y="220" width="155" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="eval" value="&lt;b&gt;Evaluator&lt;/b&gt;&lt;br&gt;контекста достаточно?&lt;br&gt;цитаты подтверждаются?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontStyle=1" vertex="1" parent="rt">
+          <mxGeometry x="1495" y="220" width="150" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="gout" value="&lt;b&gt;Guardrail Out&lt;/b&gt;&lt;br&gt;цитаты только из&lt;br&gt;разрешённых источников" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" vertex="1" parent="rt">
+          <mxGeometry x="1690" y="220" width="115" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="memory" value="&lt;b&gt;Memory Module&lt;/b&gt;&lt;br&gt;agents/memory.py&lt;br&gt;история сессии из PostgreSQL&lt;br&gt;→ state графа" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontStyle=1" vertex="1" parent="rt">
+          <mxGeometry x="215" y="430" width="220" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="egp" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="gin" target="planner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ept" value="план шага" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="planner" target="tools">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="etv" value="retrieve_vec" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="tools" target="vret">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="etg" value="expand_graph" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="tools" target="gexp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="evf" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="vret" target="fusion">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="egf" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="gexp" target="fusion">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="efr" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="fusion" target="rerank">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="erg" value="топ-N контекста" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="rerank" target="gen">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ege" value="черновик ответа" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="gen" target="eval">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ego" value="достаточно" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="rt" source="eval" target="gout">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eloop" value="AGENT LOOP: недостаточно контекста → re-plan (уточнение запроса), максимум 2 итерации" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#B85450;fontColor=#B85450;exitX=0.5;exitY=0;entryX=0.5;entryY=0;" edge="1" parent="rt" source="eval" target="planner">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1560" y="90"/>
+              <mxPoint x="325" y="90"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="emp" value="история → state" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#D6B656;" edge="1" parent="rt" source="memory" target="planner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="egm" value="append turn" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#D6B656;exitX=0;exitY=0.5;entryX=1;entryY=0.25;" edge="1" parent="rt" source="gen" target="memory">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1367" y="480"/>
+              <mxPoint x="500" y="480"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

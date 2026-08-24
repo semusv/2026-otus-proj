@@ -1,0 +1,92 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="seqquery" name="Sequence Query Flow">
+    <mxGraphModel dx="1800" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p_user" value="Пользователь" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#08427B;fontColor=#ffffff;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="150" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_fe" value="Frontend SPA" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="1">
+          <mxGeometry x="240" y="40" width="150" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_tr" value="Traefik&#xa;(X-Trace-Id pass)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#1168BD;fontColor=#ffffff;strokeColor=#0B4884;" vertex="1" parent="1">
+          <mxGeometry x="440" y="40" width="150" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_be" value="Backend API&#xa;(guardrail in/out,&#xa;fusion+rerank)&#xa;[LangGraph runner]" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#1168BD;fontColor=#ffffff;strokeColor=#0B4884;" vertex="1" parent="1">
+          <mxGeometry x="640" y="40" width="170" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_pl" value="Planner&#xa;(+ Memory из PG)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="1">
+          <mxGeometry x="860" y="40" width="160" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_tl" value="Tools Interface&#xa;(Qdrant retrieve_vec&#xa;+ Neo4j expand_graph)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="1">
+          <mxGeometry x="1075" y="40" width="180" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_llm" value="vLLM&#xa;(generate stream)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#F8CECC;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="40" width="150" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="p_ev" value="Evaluator&#xa;(достаточно контекста?)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=44;fillColor=#E1D5E7;strokeColor=#9673A6;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="40" width="170" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1" value="1: ввод вопроса (генерируется X-Trace-Id)" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.06;entryX=0;entryY=0.06;" edge="1" parent="1" source="p_user" target="p_fe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m2" value="2: POST /api/chat&#xa;(JWT · X-Trace-Id · traceparent)" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.11;entryX=0;entryY=0.11;" edge="1" parent="1" source="p_fe" target="p_tr">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3" value="3: reverse proxy → backend (заголовки корреляции сохранены)" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.16;entryX=0;entryY=0.16;" edge="1" parent="1" source="p_tr" target="p_be">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m4" value="4: guardrail_in (инъекции/PII) → init state + история из Memory (PG)" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.22;entryX=0;entryY=0.22;" edge="1" parent="1" source="p_be" target="p_pl">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m5" value="5: план шага — выбор инструментов (retrieve_vec | expand_graph)" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.28;entryX=0;entryY=0.28;" edge="1" parent="1" source="p_pl" target="p_tl">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m6" value="6: Tool Execution — pre-fetch ACL: clearance IN allowed(role); векторный поиск + расширение графа 1–2 hop" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=0;exitY=0.36;entryX=1;entryY=0.36;dashed=0;strokeWidth=1;" edge="1" parent="1" source="p_tl" target="p_be">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7" value="7: fusion (RRF) + rerank (bge-reranker CPU) → топ-N контекста" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=0.5;exitY=0.42;entryX=0.5;entryY=0.42;" edge="1" parent="1" source="p_be" target="p_be">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850" y="360"/>
+              <mxPoint x="850" y="388"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m8" value="8: generate(prompt) — стриминг SSE" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.48;entryX=0;entryY=0.48;" edge="1" parent="1" source="p_be" target="p_llm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m9" value="9: токены ответа (stream)" style="html=1;endArrow=open;dashed=1;startSize=6;endSize=6;exitX=0;exitY=0.55;entryX=1;entryY=0.55;" edge="1" parent="1" source="p_llm" target="p_be">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10" value="10: evaluate — контекста достаточно?" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=1;exitY=0.61;entryX=0;entryY=0.61;" edge="1" parent="1" source="p_be" target="p_ev">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m11" value="11 [нет]: re-plan — уточнённый запрос (макс. 2 итерации)" style="html=1;endArrow=block;dashed=1;strokeColor=#B85450;fontColor=#B85450;startSize=6;endSize=6;exitX=0;exitY=0.68;entryX=1;entryY=0.68;" edge="1" parent="1" source="p_ev" target="p_pl">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m12" value="12: guardrail_out — цитаты только из разрешённых источников (ACL)" style="html=1;endArrow=block;startSize=6;endSize=6;exitX=0.5;exitY=0.75;entryX=0.5;entryY=0.75;" edge="1" parent="1" source="p_be" target="p_be">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="890" y="585"/>
+              <mxPoint x="890" y="613"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m13" value="13: SSE-ответ: токены + цитаты + путь графа (X-Trace-Id echo)" style="html=1;endArrow=open;dashed=1;startSize=6;endSize=6;exitX=0;exitY=0.83;entryX=1;entryY=0.83;" edge="1" parent="1" source="p_be" target="p_fe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m14" value="14: отображение ответа пользователю" style="html=1;endArrow=open;dashed=1;startSize=6;endSize=6;exitX=0;exitY=0.9;entryX=1;entryY=0.9;" edge="1" parent="1" source="p_fe" target="p_user">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="note_loop" value="AGENT LOOP: шаги 5–11 повторяются до «достаточно» или лимита 2 итераций;&#xa;затем guardrail_out и финальный SSE-ответ." style="text;html=1;align=left;verticalAlign=top;fillColor=#FFF9E6;strokeColor=#D6B656;rounded=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="660" y="815" width="700" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="note_obs" value="Наблюдаемость: каждый хоп несёт X-Trace-Id / traceparent;&#xa;спаны узлов графа LangGraph экспортируются в Jaeger через OTel." style="text;html=1;align=left;verticalAlign=top;fillColor=#FFF9E6;strokeColor=#D6B656;rounded=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="815" width="420" height="50" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

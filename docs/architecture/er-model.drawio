@@ -1,0 +1,89 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="ermodel" name="ER Model">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="pgg" value="PostgreSQL — RBAC · сессии · аудит" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="500" height="640" as="geometry"/>
+        </mxCell>
+        <mxCell id="users" value="&lt;b&gt;users&lt;/b&gt;&#xa;— id: uuid PK&#xa;— email: text UNIQUE&#xa;— password_hash: text&#xa;— role_id: uuid FK → roles.id&#xa;— is_active: bool&#xa;— created_at: timestamptz" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;verticalAlign=top;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="pgg">
+          <mxGeometry x="30" y="45" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="roles" value="&lt;b&gt;roles&lt;/b&gt;&#xa;— id: uuid PK&#xa;— name: text UNIQUE&#xa;&amp;nbsp;&amp;nbsp;(viewer | analyst | admin)&#xa;— clearances: text[]&#xa;&amp;nbsp;&amp;nbsp;(PUBLIC/INTERNAL/SECRET)" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;verticalAlign=top;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="pgg">
+          <mxGeometry x="280" y="45" width="200" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="sessions" value="&lt;b&gt;sessions&lt;/b&gt;&#xa;— id: uuid PK&#xa;— user_id: uuid FK → users.id&#xa;— token_jti: text UNIQUE&#xa;— created_at / expires_at&#xa;— revoked: bool" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;verticalAlign=top;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="pgg">
+          <mxGeometry x="30" y="230" width="210" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="chat_sessions" value="&lt;b&gt;chat_messages&lt;/b&gt;&#xa;— id: uuid PK&#xa;— session_id: uuid FK&#xa;— role: text (user|assistant)&#xa;— content: text&#xa;— citations_json: jsonb&#xa;— created_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;verticalAlign=top;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="pgg">
+          <mxGeometry x="30" y="400" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="audit" value="&lt;b&gt;audit_log&lt;/b&gt;&#xa;— id: bigserial PK&#xa;— user_id: uuid FK (nullable)&#xa;— action: text (login|query|ingest…)&#xa;— trace_id / request_id: text&#xa;— status: text (ok|denied|degraded)&#xa;— payload_json: jsonb · created_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;verticalAlign=top;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="pgg">
+          <mxGeometry x="30" y="540" width="210" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="qdg" value="Qdrant — векторы чанков (коллекция chunks)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#82B366;verticalAlign=top;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="580" y="40" width="380" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="chunks" value="&lt;b&gt;point (chunk)&lt;/b&gt;&#xa;— point_id (auto)&#xa;— vector: float32[1024] (bge-m3)&#xa;— payload:&#xa;&amp;nbsp;&amp;nbsp;· act_id: string → Act.id&#xa;&amp;nbsp;&amp;nbsp;· title: string&#xa;&amp;nbsp;&amp;nbsp;· chunk_no: int&#xa;&amp;nbsp;&amp;nbsp;· clearance: keyword&#xa;&amp;nbsp;&amp;nbsp;&amp;nbsp;(PUBLIC | INTERNAL | SECRET)" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;verticalAlign=top;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="qdg">
+          <mxGeometry x="35" y="45" width="310" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="njg" value="Neo4j — граф знаний (онтология ADR-006)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;verticalAlign=top;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="40" width="620" height="640" as="geometry"/>
+        </mxCell>
+        <mxCell id="act" value="(:Act)&#xa;id · title · doc_number&#xa;date · status · clearance" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" vertex="1" parent="njg">
+          <mxGeometry x="60" y="60" width="180" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="act2" value="(:Act)&#xa;другой акт корпуса" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" vertex="1" parent="njg">
+          <mxGeometry x="360" y="60" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="auth" value="(:Authority)&#xa;name" style="ellipse;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="njg">
+          <mxGeometry x="60" y="250" width="140" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="topic" value="(:Topic)&#xa;name" style="ellipse;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="njg">
+          <mxGeometry x="240" y="250" width="120" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="concept" value="(:Concept)&#xa;name (LLM-экстракция)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;" vertex="1" parent="njg">
+          <mxGeometry x="420" y="250" width="180" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="r_iss" value="ISSUED_BY&#xa;(детерминир.)" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="njg" source="act" target="auth">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r_top" value="HAS_TOPIC&#xa;(детерминир.)" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="njg" source="act" target="topic">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r_ref" value="REFERENCES&#xa;(ref nd=, цель в корпусе)" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="njg" source="act" target="act2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r_men" value="MENTIONS (LLM)" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#9673A6;endArrow=block;exitX=1;exitY=0.75;entryX=0.5;entryY=0;" edge="1" parent="njg" source="act2" target="concept">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel_users_roles" value="N : 1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;startArrow=none;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="pgg" source="users" target="roles">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel_sess_users" value="user_id → N : 1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="pgg" source="sessions" target="users">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel_msg_sess" value="session_id → N : 1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="pgg" source="chat_sessions" target="sessions">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel_audit_users" value="user_id → N : 1" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;endArrow=block;exitX=0;exitY=0.25;entryX=0;entryY=1;" edge="1" parent="pgg" source="audit" target="users">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="10" y="562"/>
+              <mxPoint x="10" y="195"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel_chunks_act" value="payload.act_id → Act.id (логическая связь)" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#82B366;endArrow=open;exitX=1;exitY=0.5;entryX=0;entryY=0.75;" edge="1" parent="1" source="chunks" target="act">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="985" y="205"/>
+              <mxPoint x="985" y="108"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
