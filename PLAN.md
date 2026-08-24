@@ -152,7 +152,7 @@
 - [x] Сверка покрытия с `tasks.md`: C4 L1–L3 ✓ Deployment ✓ Data Flow ✓ Sequence ✓ ER ✓ trade-offs ✓ Security-by-Design ✓
 - [x] Каждая `.drawio` проверена открытием в draw.io (валидация парсинга через draw.io MCP)
 - [x] Все ссылки из `index.md` рабочие
-- [ ] Коммит `stage-1(docs): ...` + тег `stage/1`
+- [x] Коммит `stage-1(docs): ...` + тег `stage/1`
 
 **Acceptance:** покрыты все критерии tasks.md (Deployment ✓ Data Flow ✓ trade-offs ✓ Security-by-Design ✓); диаграммы открываются в draw.io.
 

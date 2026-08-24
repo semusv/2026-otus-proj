@@ -26,4 +26,25 @@ replay_pid*
 .gigacode
 .mimocode
 .lectures
-# Old labs
+Old labs
+corpus
+corpus_test
+
+# draw.io autosave/backup
+.$*.bkp
+*.bkp
+
+# secrets & local env
+.env
+.env.*
+
+# infra runtime data (volumes bind mounts)
+infra/data/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
