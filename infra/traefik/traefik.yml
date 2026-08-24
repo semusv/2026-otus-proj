@@ -1,0 +1,20 @@
+entryPoints:
+  web:
+    address: ":80"
+
+ping:
+  entryPoint: web
+
+api:
+  dashboard: true
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: graphrag_edge
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: INFO

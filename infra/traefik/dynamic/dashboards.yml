@@ -1,0 +1,7 @@
+http:
+  routers:
+    traefik-dashboard:
+      rule: "Host(`traefik.localhost`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      service: api@internal
+      entryPoints:
+        - web

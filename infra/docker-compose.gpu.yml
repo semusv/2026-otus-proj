@@ -1,0 +1,42 @@
+services:
+  vllm:
+    image: ${APP_DOCKER_REGISTRY:-}vllm/vllm-openai:v0.27.1-cu129
+    container_name: graphrag-vllm
+    restart: unless-stopped
+    command: >
+      --host 0.0.0.0
+      --port 8000
+      --model ${APP_VLLM_MODEL:?APP_VLLM_MODEL is required}
+      --served-model-name ${APP_VLLM_SERVED_NAME}
+      --max-model-len ${APP_VLLM_MAX_MODEL_LEN}
+      --gpu-memory-utilization ${APP_VLLM_GPU_MEM_UTIL}
+    environment:
+      HF_ENDPOINT: ${HF_ENDPOINT:-}
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    networks:
+      - data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+
+networks:
+  data:
+    external: true
+    name: graphrag_data
+
+volumes:
+  hf_cache:
+    name: graphrag_hf_cache

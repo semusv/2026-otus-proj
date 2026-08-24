@@ -1,0 +1,87 @@
+services:
+  otel-collector:
+    image: ${APP_DOCKER_REGISTRY:-}otel/opentelemetry-collector-contrib:0.159.0
+    container_name: graphrag-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - data
+
+  jaeger:
+    image: ${APP_DOCKER_REGISTRY:-}jaegertracing/all-in-one:1.74.0
+    container_name: graphrag-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - edge
+      - data
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: graphrag_edge
+      traefik.http.routers.jaeger.rule: Host(`jaeger.localhost`)
+      traefik.http.routers.jaeger.entrypoints: web
+      traefik.http.services.jaeger.loadbalancer.server.port: "16686"
+
+  prometheus:
+    image: ${APP_DOCKER_REGISTRY:-}prom/prometheus:v3.7.3
+    container_name: graphrag-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - edge
+      - data
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: graphrag_edge
+      traefik.http.routers.prometheus.rule: Host(`prometheus.localhost`)
+      traefik.http.routers.prometheus.entrypoints: web
+      traefik.http.services.prometheus.loadbalancer.server.port: "9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  grafana:
+    image: ${APP_DOCKER_REGISTRY:-}grafana/grafana:12.3.11
+    container_name: graphrag-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${APP_GRAFANA_ADMIN_USER:?APP_GRAFANA_ADMIN_USER is required}
+      GF_SECURITY_ADMIN_PASSWORD: ${APP_GRAFANA_ADMIN_PASSWORD:?APP_GRAFANA_ADMIN_PASSWORD is required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - edge
+      - data
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: graphrag_edge
+      traefik.http.routers.grafana.rule: Host(`grafana.localhost`)
+      traefik.http.routers.grafana.entrypoints: web
+      traefik.http.services.grafana.loadbalancer.server.port: "3000"
+
+networks:
+  edge:
+    external: true
+    name: graphrag_edge
+  data:
+    external: true
+    name: graphrag_data
+
+volumes:
+  prometheus_data:
+    name: graphrag_prometheus_data
+  grafana_data:
+    name: graphrag_grafana_data

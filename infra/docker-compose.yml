@@ -1,0 +1,154 @@
+name: graphrag
+
+services:
+  traefik:
+    image: ${APP_DOCKER_REGISTRY:-}traefik:v3.7.11
+    container_name: graphrag-traefik
+    restart: unless-stopped
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    ports:
+      - "127.0.0.1:${APP_TRAEFIK_HTTP_PORT:-80}:80"
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: ../backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    image: graphrag/backend:stage2
+    container_name: graphrag-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: dev
+    ports:
+      - "127.0.0.1:${APP_BACKEND_PORT:-8000}:8000"
+    networks:
+      - edge
+      - data
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: graphrag_edge
+      traefik.http.routers.backend.rule: Host(`api.localhost`)
+      traefik.http.routers.backend.entrypoints: web
+      traefik.http.services.backend.loadbalancer.server.port: "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: ${APP_DOCKER_REGISTRY:-}postgres:16-alpine
+    container_name: graphrag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${APP_PG_USER:?APP_PG_USER is required}
+      POSTGRES_PASSWORD: ${APP_PG_PASSWORD:?APP_PG_PASSWORD is required}
+      POSTGRES_DB: ${APP_PG_DB:?APP_PG_DB is required}
+    ports:
+      - "127.0.0.1:${APP_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - data
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  qdrant:
+    image: ${APP_DOCKER_REGISTRY:-}qdrant/qdrant:v1.19.0
+    container_name: graphrag-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${APP_QDRANT_HTTP_PORT:-6333}:6333"
+      - "127.0.0.1:${APP_QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  neo4j:
+    image: ${APP_DOCKER_REGISTRY:-}neo4j:5.26.30-community
+    container_name: graphrag-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${APP_NEO4J_PASSWORD:?APP_NEO4J_PASSWORD is required}
+      APP_NEO4J_PASSWORD: ${APP_NEO4J_PASSWORD}
+    ports:
+      - "127.0.0.1:${APP_NEO4J_HTTP_PORT:-7474}:7474"
+      - "127.0.0.1:${APP_NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - data
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: graphrag_edge
+      traefik.http.routers.neo4j.rule: Host(`neo4j.localhost`)
+      traefik.http.routers.neo4j.entrypoints: web
+      traefik.http.services.neo4j.loadbalancer.server.port: "7474"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${APP_NEO4J_PASSWORD}\" 'RETURN 1'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  vault:
+    image: ${APP_DOCKER_REGISTRY:-}hashicorp/vault:2.0.4
+    container_name: graphrag-vault
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    command: ["server", "-dev", "-dev-root-token-id=${APP_VAULT_DEV_ROOT_TOKEN:?APP_VAULT_DEV_ROOT_TOKEN is required}", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "127.0.0.1:${APP_VAULT_PORT:-8200}:8200"
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8200/v1/sys/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  edge:
+    name: graphrag_edge
+  data:
+    name: graphrag_data
+
+volumes:
+  pg_data:
+    name: graphrag_pg_data
+  qdrant_data:
+    name: graphrag_qdrant_data
+  neo4j_data:
+    name: graphrag_neo4j_data
+  neo4j_logs:
+    name: graphrag_neo4j_logs
