@@ -39,10 +39,24 @@ services:
       APP_PG_USER: ${APP_PG_USER:?APP_PG_USER is required}
       APP_PG_PASSWORD: ${APP_PG_PASSWORD:?APP_PG_PASSWORD is required}
       APP_PG_DB: ${APP_PG_DB:?APP_PG_DB is required}
+      APP_QDRANT_URL: http://qdrant:6333
+      APP_NEO4J_URI: bolt://neo4j:7687
+      APP_NEO4J_USER: neo4j
+      APP_NEO4J_PASSWORD: ${APP_NEO4J_PASSWORD:?APP_NEO4J_PASSWORD is required}
+      APP_LLM_BASE_URL: ${APP_LLM_BASE_URL:?APP_LLM_BASE_URL is required}
+      APP_LLM_API_KEY: ${APP_LLM_API_KEY:-lm-studio}
+      APP_LLM_MODEL: ${APP_LLM_MODEL:?APP_LLM_MODEL is required}
+      APP_INGEST_CORPUS_DIR: /data/corpus
+    volumes:
+      - ../corpus_test:/data/corpus:ro
     ports:
       - "127.0.0.1:${APP_BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"]
     networks:

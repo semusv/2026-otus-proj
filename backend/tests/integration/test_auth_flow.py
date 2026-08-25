@@ -1,6 +1,10 @@
 """Интеграционные тесты auth-флоу против реальной PG (compose)."""
 
+from collections.abc import Callable
+
 import pytest
+from app.config import Settings
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.helpers import CREDENTIALS, seed_users
 
@@ -8,7 +12,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(autouse=True)
-async def seeded_users(base_settings: object, pg_dsn: str) -> None:
+async def seeded_users(base_settings: Settings, pg_dsn: str) -> None:
     await seed_users(base_settings, pg_dsn)
 
 async def test_login_and_me_roundtrip(itg_client: tuple) -> None:
@@ -71,7 +75,9 @@ async def test_me_with_garbage_token_401(itg_client: tuple) -> None:
     assert resp.status_code == 401
 
 
-async def test_login_creates_session_row(itg_client: tuple, db_factory: object) -> None:
+async def test_login_creates_session_row(
+    itg_client: tuple, db_factory: Callable[[], AsyncSession]
+) -> None:
     client, app = itg_client
     token = (
         await client.post(
@@ -86,7 +92,7 @@ async def test_login_creates_session_row(itg_client: tuple, db_factory: object) 
 
     from app.db.models import AuthSession
 
-    async with db_factory() as session:  # type: ignore[misc]
+    async with db_factory() as session:
         row = await session.get(AuthSession, claims.jti)
         assert row is not None
         assert row.revoked is False

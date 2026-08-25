@@ -7,11 +7,12 @@
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus
 
 from dotenv import dotenv_values
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = "../infra/.env"
@@ -64,9 +65,49 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr
     jwt_ttl_minutes: int = 30
 
+    # --- Qdrant (векторная БД, ADR-003) ---
+    qdrant_url: str
+    qdrant_collection: str = "chunks"
+
+    # --- Neo4j (граф знаний, ADR-004) ---
+    neo4j_uri: str
+    neo4j_user: str = "neo4j"
+    neo4j_password: SecretStr
+
+    # --- LLM (OpenAI-совместимый endpoint: LM Studio dev / vLLM целевой, ADR-001) ---
+    llm_base_url: str
+    llm_api_key: SecretStr = SecretStr("lm-studio")
+    llm_model: str
+
+    # --- Embeddings (bge-m3 CPU-in-process, ADR-009) ---
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_batch_size: int = Field(default=32, ge=1)
+    embedding_device: Literal["cpu", "cuda"] = "cpu"
+
+    # --- Чанкинг ---
+    chunk_max_chars: int = Field(default=1800, ge=200)
+    chunk_overlap_chars: int = Field(default=200, ge=0)
+
+    # --- Ingestion ---
+    ingest_corpus_dir: Path = Path("../corpus_test")
+    ingest_extract_concepts: bool = False
+    ingest_internal_percent: int = Field(default=20, ge=0, le=100)
+    ingest_secret_percent: int = Field(default=10, ge=0, le=100)
+    ingest_concept_max_per_chunk: int = Field(default=6, ge=1, le=20)
+
     # --- Метаданные API ---
     api_title: str = "GraphRAG Platform API"
-    api_version: str = "0.3.0"
+    api_version: str = "0.4.0"
+
+    @model_validator(mode="after")
+    def _validate_clearance_split(self) -> "Settings":
+        """PUBLIC получает остаток; INTERNAL+SECRET обязаны оставлять место для него."""
+        if self.ingest_internal_percent + self.ingest_secret_percent >= 100:
+            raise ValueError(
+                "Сумма APP_INGEST_INTERNAL_PERCENT и APP_INGEST_SECRET_PERCENT "
+                "должна быть меньше 100 (остаток — PUBLIC)"
+            )
+        return self
 
     @property
     def async_dsn(self) -> str:

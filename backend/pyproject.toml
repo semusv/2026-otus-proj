@@ -15,6 +15,10 @@ dependencies = [
     "PyYAML>=6.0.2",
     "SQLAlchemy[asyncio]>=2.0.40",
     "uvicorn[standard]>=0.34",
+    "qdrant-client>=1.19.0",
+    "neo4j>=6.2.0",
+    "sentence-transformers>=6.0.0",
+    "openai>=3.3.1",
 ]
 
 [dependency-groups]
@@ -26,6 +30,16 @@ dev = [
     "pytest-asyncio>=0.25",
     "ruff>=0.9",
 ]
+
+# CPU-only сборка torch (официальный индекс PyTorch): без CUDA-библиотек ~2-3GB
+# в docker-образе; bge-m3 работает на CPU (ADR-009).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
 
 [tool.ruff]
 line-length = 100
@@ -65,7 +79,7 @@ warn_unused_ignores = true
 warn_unused_configs = false  # overrides для migrations/scripts нужны на следующих этапах
 
 [[tool.mypy.overrides]]
-module = ["alembic.*"]
+module = ["alembic.*", "asyncpg"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

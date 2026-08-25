@@ -5,7 +5,7 @@
 
 import asyncio
 import uuid as uuidlib
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 
 import asyncpg
@@ -15,6 +15,7 @@ from alembic import command
 from alembic.config import Config
 from app.config import Settings
 from app.main import create_app
+from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 INFRA_ENV = BACKEND_DIR.parent / "infra" / ".env"
@@ -37,7 +38,7 @@ def base_settings() -> Settings:
 
 
 @pytest.fixture(scope="session")
-def pg_dsn(base_settings: Settings) -> AsyncIterator[str]:
+def pg_dsn(base_settings: Settings) -> Iterator[str]:
     """Создаёт уникальную тестовую БД, применяет миграции, удаляет после сессии."""
     dbname = f"graphrag_itg_{uuidlib.uuid4().hex[:8]}"
     admin_dsn = _pg_native_dsn(_replace_db(base_settings.async_dsn, "postgres"))
@@ -78,20 +79,20 @@ async def itg_client(
     test_dbname = pg_dsn.rsplit("/", 1)[1]
     settings = base_settings.model_copy(update={"pg_db": test_dbname})
     app = create_app(settings)
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client, app
 
 
 @pytest.fixture
-async def db_factory(itg_client: tuple[httpx.AsyncClient, object]) -> AsyncIterator[
-    Callable[[], object]
-]:
+async def db_factory(
+    itg_client: tuple[httpx.AsyncClient, object],
+) -> AsyncIterator[Callable[[], AsyncSession]]:
     """Фабрика сессий БД приложения (для прямых проверок таблиц)."""
     _, app = itg_client
     session_factory = app.state.db.session_factory  # type: ignore[attr-defined]
 
-    def _make() -> object:
+    def _make() -> AsyncSession:
         return session_factory()
 
     yield _make
