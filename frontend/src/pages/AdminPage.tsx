@@ -47,6 +47,13 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
   }, [refresh])
 
   const start = async () => {
+    const confirmed = window.confirm(
+      'Пересобрать весь корпус?\n\n' +
+        'XML-файлы будут прочитаны заново из каталога APP_INGEST_CORPUS_DIR\n' +
+        '(в compose: corpus_test/ репозитория → /data/corpus в контейнере backend).\n' +
+        'Каждый акт перезаписывается в Qdrant/Neo4j (без дублей).',
+    )
+    if (!confirmed) return
     setBusy(true)
     setNotice(null)
     setError(null)
@@ -72,9 +79,38 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       <div className="card admin-card">
         <h2>Ingestion корпуса</h2>
         <p className="muted">
-          Разбор XML-актов → чанки → эмбеддинги → Qdrant; граф Act/Authority/Topic/Concept → Neo4j.
-          Кнопка доступна только роли admin.
+          Полная пересборка корпуса правовых актов: XML → чанки → эмбеддинги → Qdrant,
+          граф Act/Authority/Topic → Neo4j. Кнопка доступна только роли admin.
         </p>
+
+        <div className="info-box">
+          <b>Откуда берутся файлы:</b> backend читает каталог из переменной окружения{' '}
+          <code className="mono">APP_INGEST_CORPUS_DIR</code> — в compose-стеке туда смонтирован
+          каталог <code className="mono">corpus_test/</code> из корня репозитория (путь внутри
+          контейнера: <code className="mono">/data/corpus</code>). Изменить источник можно без
+          правки кода — через env.
+        </div>
+
+        <details className="admin-details">
+          <summary>Как это работает</summary>
+          <ol className="admin-steps">
+            <li>
+              Парсинг всех <code className="mono">*.xml</code> каталога: метаданные акта, чистка
+              разметки, чанки по статьям.
+            </li>
+            <li>Эмбеддинги bge-m3 (CPU) → upsert в коллекцию Qdrant c payload (clearance и пр.).</li>
+            <li>
+              Граф в Neo4j: Act / Authority / Topic + рёбра ISSUED_BY, REFERENCES, HAS_TOPIC;
+              LLM-экстракция Concept выключена по умолчанию (
+              <code className="mono">APP_INGEST_EXTRACT_CONCEPTS=false</code>, полный цикл — CLI).
+            </li>
+            <li>
+              Прогон идемпотентен: акт перезаписывается целиком (Qdrant upsert, Neo4j MERGE),
+              повторный запуск не создаёт дублей; во время прогона ответы агента могут быть
+              временно неполными.
+            </li>
+          </ol>
+        </details>
 
         <div className="admin-controls">
           <button className="btn btn-primary" disabled={busy || status?.state === 'running'} onClick={() => void start()}>

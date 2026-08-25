@@ -55,7 +55,6 @@ export default function ChatPage({ onUnauthorized }: ChatPageProps) {
     if (text.length === 0 || streaming) return
     setInput('')
     setStreaming(true)
-
     const userMsg: UiMessage = { id: crypto.randomUUID(), role: 'user', text }
     const assistantMsg: UiMessage = {
       id: crypto.randomUUID(),
@@ -117,8 +116,29 @@ export default function ChatPage({ onUnauthorized }: ChatPageProps) {
     }
   }
 
+  /** Новый диалог: прерывает активный стриминг, чистит ленту и session_id. */
+  const startNewChat = () => {
+    if (streaming) abortRef.current?.abort()
+    setMessages([])
+    setSessionId(null)
+    setInput('')
+  }
+
   return (
     <section className="chat-page">
+      <div className="chat-toolbar">
+        <span className="muted chat-session mono" title="Идентификатор диалога передаётся в /api/chat">
+          {sessionId !== null ? `диалог ${sessionId.slice(0, 8)}…` : 'новый диалог'}
+        </span>
+        <button
+          type="button"
+          className="btn btn-ghost btn-small"
+          onClick={startNewChat}
+          disabled={messages.length === 0 && sessionId === null}
+        >
+          + Новый чат
+        </button>
+      </div>
       <div className="chat-scroll">
         {messages.length === 0 && (
           <div className="chat-empty">
