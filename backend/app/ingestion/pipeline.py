@@ -47,8 +47,13 @@ async def run_ingestion(
     corpus_dir: Path,
     *,
     extract_concepts: bool | None = None,
+    embedder: Embedder | None = None,
 ) -> IngestStats:
-    """Полный прогон ingestion по каталогу XML-файлов."""
+    """Полный прогон ingestion по каталогу XML-файлов.
+
+    ``embedder`` - точка расширения для тестов (стаб с детерминированными
+    векторами); по умолчанию создаётся реальный bge-m3 (ADR-009).
+    """
     stats = IngestStats()
     do_concepts = (
         settings.ingest_extract_concepts if extract_concepts is None else extract_concepts
@@ -70,7 +75,7 @@ async def run_ingestion(
     stats.acts_parsed = len(acts)
     corpus_ids = {act.id for act in acts}
 
-    embedder = Embedder(
+    embedder = embedder or Embedder(
         settings.embedding_model,
         batch_size=settings.embedding_batch_size,
         device=settings.embedding_device,
