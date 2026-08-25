@@ -3,6 +3,7 @@ import {
   ApiError,
   adminCreateUser,
   adminListUsers,
+  adminUpdateUserRole,
   ingestStatus,
   startIngest,
   storageStats,
@@ -12,6 +13,7 @@ import type { components } from '../lib/api-types'
 type IngestStatusResponse = components['schemas']['IngestStatusResponse']
 type StorageStats = components['schemas']['StorageStatsResponse']
 type UserOut = components['schemas']['UserOut']
+type UserCreate = components['schemas']['UserCreate']
 
 interface AdminPageProps {
   onUnauthorized: () => void
@@ -85,6 +87,30 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       if (err instanceof ApiError && err.status === 409) setUsersError('Это имя уже занято')
       else if (err instanceof ApiError && err.status === 401) onUnauthorized()
       else setUsersError(err instanceof ApiError ? err.message : 'Не удалось создать пользователя')
+    }
+  }
+
+  const changeRole = async (target: UserOut, role: UserCreate['role']) => {
+    if (role === target.role) return
+    const confirmed = window.confirm(
+      `Сменить роль ${target.username}: ${target.role} → ${role}?\n\n` +
+        'Метки доступа обновятся сразу — пользователю не нужно перелогиниваться.',
+    )
+    if (!confirmed) return
+    setUsersError(null)
+    setUserNotice(null)
+    try {
+      const updated = await adminUpdateUserRole(target.user_id, role)
+      setUserNotice(
+        `Роль ${updated.username} изменена на ${updated.role}; метки доступа: ${updated.clearances.join(', ')}`,
+      )
+      await refreshUsers()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403)
+        setUsersError('Свою роль менять нельзя (защита от потери последнего админа)')
+      else if (err instanceof ApiError && err.status === 401) onUnauthorized()
+      else setUsersError(err instanceof ApiError ? err.message : 'Не удалось сменить роль')
+      await refreshUsers()
     }
   }
 
@@ -286,6 +312,16 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
                   ))}
                 </span>
                 {!u.is_active && <span className="badge badge-neutral">деактивирован</span>}
+                <select
+                  className="role-select"
+                  value={u.role}
+                  onChange={(e) => void changeRole(u, e.target.value as UserCreate['role'])}
+                  title="Сменить роль (права применяются сразу)"
+                >
+                  <option value="viewer">viewer</option>
+                  <option value="analyst">analyst</option>
+                  <option value="admin">admin</option>
+                </select>
               </div>
             ))}
           </div>

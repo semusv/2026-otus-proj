@@ -161,6 +161,15 @@ export function adminCreateUser(body: UserCreate): Promise<UserOut> {
   })
 }
 
+/** Сменить роль пользователя — admin-only; права применяются сразу, без перелогина. */
+export function adminUpdateUserRole(userId: string, role: UserCreate['role']): Promise<UserOut> {
+  return request<UserOut>(`/admin/users/${userId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  })
+}
+
 /**
  * SSE-стрим чата. POST + ReadableStream (EventSource не умеет POST/Bearer),
  * парсинг фреймов через SseParser. Ошибки HTTP бросаются как ApiError.

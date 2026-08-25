@@ -170,6 +170,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Сменить роль пользователя (метки доступа пересчитаются из роли)
+         * @description Права применяются сразу: clearances резолвятся из БД на каждом запросе,
+         *     повторный вход не требуется. Смена собственной роли запрещена (защита от
+         *     случайной потери последнего админа).
+         */
+        patch: operations["change_user_role_admin_users__user_id__patch"];
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -438,6 +460,20 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * UserRoleUpdate
+         * @description Смена роли пользователя админом; метки доступа пересчитаются из роли.
+         * @example {
+         *       "role": "analyst"
+         *     }
+         */
+        UserRoleUpdate: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "viewer" | "analyst" | "admin";
         };
         /** UsersListResponse */
         UsersListResponse: {
@@ -765,6 +801,55 @@ export interface operations {
             };
             /** @description Имя занято */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_user_role_admin_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserRoleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Не admin или попытка сменить собственную роль */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Пользователь не найден */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
