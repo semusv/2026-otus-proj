@@ -585,6 +585,17 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 4. **Реальная гриф-разметка вместо демо-хэша**: метка из атрибута XML/фронта документа +
    ручная перекатегоризация акта админом (`PATCH /admin/acts/{id}/clearance`).
 5. **Просмотр полного текста источника** по клику из цитаты (эндпоинт контента акта с ACL).
+6. **Удаление пользователя**: `DELETE /admin/users/{id}` (admin-only). Ограничения: нельзя
+   удалить самого себя и последнего активного админа. Порядок чистки FK (см.
+   `scripts/cleanup_test_users.sql`): chat_messages → chat_sessions → sessions →
+   audit_log отвязать (user_id=NULL, события сохраняются) → users; Qdrant/Neo4j не затрагиваются.
+   UI: кнопка в строке «Пользователи» с confirm. Мягкий вариант по умолчанию — деактивация
+   (`is_active=false`, вход блокирован, история целая); hard delete — явным флагом.
+7. **Гигиена тестовых данных**: postman-коллекция при каждом прогоне создаёт qa_*/hacker_*
+   пользователей в dev-БД. После п.6 добавить teardown-запросы удаления в конец коллекции;
+   до тех пор разовая чистка — `scripts/cleanup_test_users.sql` (паттерны machine-generated
+   имён, ручные аккаунты не затрагивает). Интеграционные тесты уже изолированы: свежие БД
+   graphrag_itg_* на каждую сессию.
 
 ### [ ] Этап 9. E2E Postman + нагрузочный отчёт
 **Deliverables:** полная коллекция Postman (`tests/postman/`: env local, сценарии auth → ingest status → chat RBAC → health/metrics), прогон через Newman CLI `scripts/run_postman.(ps1|sh)`. Нагрузочный тест (locust или k6) на `/api/chat` (non-stream) и `/health` → `docs/load-report.md` (RPS, p50/p95, токены/сек на RTX 5070 Ti).
