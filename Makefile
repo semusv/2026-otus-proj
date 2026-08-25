@@ -4,7 +4,7 @@
 
 BACKEND_DIR := backend
 
-.PHONY: help lint fmt format check sync lock test-unit test-integration test-all seed-users openapi-export pre-commit-install
+.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install
 
 help:
 	@echo "lint              - ruff check + mypy (gate всех этапов)"
@@ -14,6 +14,7 @@ help:
 	@echo "test-unit         - быстрые тесты (без compose)"
 	@echo "test-integration  - интеграционные тесты (нужен docker compose up postgres)"
 	@echo "test-all          - unit + integration"
+	@echo "test-judge        - LLM-as-a-Judge промпт-тесты (нужен запущенный LM Studio)"
 	@echo "seed-users        - создать роли и 3 пользователей (viewer/analyst/admin) в PG"
 	@echo "openapi-export    - экспортировать OpenAPI-контракт в docs/api/openapi.yaml"
 
@@ -45,6 +46,9 @@ test-integration:
 	cd $(BACKEND_DIR) && uv run pytest -m integration
 
 test-all: test-unit test-integration
+
+test-judge:
+	cd $(BACKEND_DIR) && uv run pytest -m gpu_slow
 
 seed-users:
 	cd $(BACKEND_DIR) && uv run python ../scripts/seed_users.py
