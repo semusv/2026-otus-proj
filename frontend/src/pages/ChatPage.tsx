@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { ApiError, chatStream } from '../lib/api'
 import type { ChatStatus, Citation, RelatedAct, StatusEvent } from '../lib/sse'
 import PipelineChips from '../components/PipelineChips'
@@ -204,15 +204,31 @@ export default function ChatPage({ onUnauthorized }: ChatPageProps) {
 }
 
 function AssistantMessage({ msg }: { msg: UiMessage }) {
+  const [hlSource, setHlSource] = useState<string | null>(null)
+  const flashTimer = useRef<number | undefined>(undefined)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
+
+  /** Подсветить источник и подскроллить к нему (маркер ↔ карточка цитаты). */
+  const focusSource = (sourceId: string, scrollTarget: 'card' | 'mark') => {
+    setHlSource(sourceId)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setHlSource(null), 1600)
+    const selector =
+      scrollTarget === 'card' ? `[data-src="${sourceId}"]` : `[data-mark="${sourceId}"]`
+    rootRef.current?.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
   return (
-    <div className="bubble bubble-assistant">
+    <div className="bubble bubble-assistant" ref={rootRef}>
       {msg.stages !== undefined && msg.stages.length > 0 && (
         <PipelineChips marks={msg.stages} active={msg.streaming === true} />
       )}
 
       {msg.text.length > 0 && (
         <p className="answer">
-          {msg.text}
+          <AnswerText text={msg.text} hlSource={hlSource} onMarkClick={(sid) => focusSource(sid, 'card')} />
           {msg.streaming && <span className="caret" aria-hidden="true" />}
         </p>
       )}
@@ -230,7 +246,15 @@ function AssistantMessage({ msg }: { msg: UiMessage }) {
           <h4>Источники</h4>
           <div className="citation-list">
             {msg.citations.map((c) => (
-              <div key={`${c.source_id}-${c.act_id}-${c.chunk_no}`} className="citation-card">
+              <div
+                key={`${c.source_id}-${c.act_id}-${c.chunk_no}`}
+                data-src={c.source_id}
+                className={`citation-card${hlSource === c.source_id ? ' citation-card-active' : ''}`}
+                onMouseEnter={() => setHlSource(c.source_id)}
+                onMouseLeave={() => setHlSource(null)}
+                onClick={() => focusSource(c.source_id, 'mark')}
+                title={`Показать ${c.source_id} в тексте ответа`}
+              >
                 <span className="mono cite-mark">[{c.source_id}]</span>
                 <span className="cite-title">{c.title}</span>
                 <span className="cite-meta muted mono">
@@ -282,5 +306,40 @@ function AssistantMessage({ msg }: { msg: UiMessage }) {
         </div>
       )}
     </div>
+  )
+}
+
+/** Текст ответа с интерактивными маркерами [S#]: клик подсвечивает карточку источника. */
+function AnswerText({
+  text,
+  hlSource,
+  onMarkClick,
+}: {
+  text: string
+  hlSource: string | null
+  onMarkClick: (sourceId: string) => void
+}) {
+  const parts = text.split(/(\[S\d+\])/g)
+  return (
+    <>
+      {parts.map((part, i) => {
+        const match = /^\[(S\d+)\]$/.exec(part)
+        if (match === null) return <Fragment key={i}>{part}</Fragment>
+        const sourceId = match[1]
+        const active = hlSource === sourceId
+        return (
+          <button
+            key={i}
+            type="button"
+            data-mark={sourceId}
+            className={`cite-ref mono${active ? ' cite-ref-active' : ''}`}
+            onClick={() => onMarkClick(sourceId)}
+            title="Показать источник"
+          >
+            {part}
+          </button>
+        )
+      })}
+    </>
   )
 }

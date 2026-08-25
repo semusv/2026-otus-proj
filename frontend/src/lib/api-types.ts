@@ -30,7 +30,7 @@ export interface paths {
         };
         /**
          * Метрики Prometheus
-         * @description Базовый эндпоинт; полные метрики этапа 7 (ADR-008).
+         * @description HTTP RPS/latency по маршрутам + бизнес-метрики чата/графа (этап 7, ADR-008).
          */
         get: operations["metrics_metrics_get"];
         put?: never;
@@ -101,6 +101,23 @@ export interface paths {
         };
         /** Статус последнего/текущего прогона ingestion */
         get: operations["ingest_status_admin_ingest_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Текущее наполнение хранилищ: Qdrant, Neo4j, PostgreSQL (агрегаты) */
+        get: operations["storage_stats_admin_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -245,6 +262,53 @@ export interface components {
              * @description Метки доступа роли (ACL для pre-fetch фильтров)
              */
             clearances: string[];
+        };
+        /**
+         * Neo4jStats
+         * @description Узлы и рёбра графа знаний (по меткам онтологии ADR-006).
+         */
+        Neo4jStats: {
+            /** Acts */
+            acts: number;
+            /** Authorities */
+            authorities: number;
+            /** Topics */
+            topics: number;
+            /** Concepts */
+            concepts: number;
+            /** Relationships */
+            relationships: number;
+        };
+        /**
+         * PostgresStats
+         * @description Учётные записи и история диалогов.
+         */
+        PostgresStats: {
+            /** Users */
+            users: number;
+            /** Chat Sessions */
+            chat_sessions: number;
+            /** Chat Messages */
+            chat_messages: number;
+        };
+        /**
+         * QdrantStats
+         * @description Наполнение векторного хранилища.
+         */
+        QdrantStats: {
+            /** Collection */
+            collection: string;
+            /** Points */
+            points: number;
+        };
+        /**
+         * StorageStatsResponse
+         * @description Снимок текущего наполнения хранилищ (без прогресса прогонов).
+         */
+        StorageStatsResponse: {
+            qdrant: components["schemas"]["QdrantStats"];
+            neo4j: components["schemas"]["Neo4jStats"];
+            postgres: components["schemas"]["PostgresStats"];
         };
         /**
          * TokenResponse
@@ -461,6 +525,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IngestStatusResponse"];
+                };
+            };
+            /** @description Не admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    storage_stats_admin_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageStatsResponse"];
                 };
             };
             /** @description Не admin */

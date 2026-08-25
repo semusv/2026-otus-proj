@@ -542,11 +542,14 @@ textarea:focus {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  cursor: pointer;
 }
 
-.citation-card:hover {
-  border-color: var(--border-strong);
+.citation-card:hover,
+.citation-card-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .cite-mark {
@@ -561,6 +564,28 @@ textarea:focus {
 
 .cite-meta {
   font-size: 12px;
+}
+
+/* маркеры [S#] в тексте ответа */
+.cite-ref {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 6px;
+  background: var(--accent-dim);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--accent-hover);
+  font-size: 0.85em;
+  line-height: 1.6;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.cite-ref:hover,
+.cite-ref-active {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
 }
 
 .citation-card .badge {
@@ -711,6 +736,53 @@ textarea:focus {
   font-size: 12.5px;
   overflow-x: auto;
   margin: 0;
+}
+
+.stats-title {
+  margin: 22px 0 4px;
+  font-size: 15px;
+}
+
+.stats-subtitle {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color var(--transition);
+}
+
+.stat-tile:hover {
+  border-color: var(--border-strong);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent-hover);
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stat-hint {
+  font-size: 11px;
 }
 
 .spinner {

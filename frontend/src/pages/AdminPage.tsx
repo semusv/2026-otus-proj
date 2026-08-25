@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, ingestStatus, startIngest } from '../lib/api'
+import { ApiError, ingestStatus, startIngest, storageStats } from '../lib/api'
 import type { components } from '../lib/api-types'
 
 type IngestStatusResponse = components['schemas']['IngestStatusResponse']
+type StorageStats = components['schemas']['StorageStatsResponse']
 
 interface AdminPageProps {
   onUnauthorized: () => void
@@ -10,26 +11,44 @@ interface AdminPageProps {
 
 const POLL_INTERVAL_MS = 2000
 
+/** Первый прогон corpus_test (~100 XML / ~2300 чанков) на CPU занимает десятки минут. */
+const RUNNING_HINT =
+  'Эмбеддинги считаются на CPU: полный прогон corpus_test может идти 10–30 минут. ' +
+  'Прогресс виден в логах backend (docker logs graphrag-backend).'
+
 export default function AdminPage({ onUnauthorized }: AdminPageProps) {
   const [status, setStatus] = useState<IngestStatusResponse | null>(null)
+  const [stats, setStats] = useState<StorageStats | null>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [nowTick, setNowTick] = useState(() => Date.now())
 
-  const refresh = useCallback(async (): Promise<IngestStatusResponse> => {
+  const refreshStatus = useCallback(async (): Promise<IngestStatusResponse> => {
     const current = await ingestStatus()
     setStatus(current)
     return current
   }, [])
 
-  // первичная загрузка + поллинг, пока идёт прогон
+  const refreshStats = useCallback(async () => {
+    try {
+      setStats(await storageStats())
+      setStatsError(null)
+    } catch (err) {
+      setStatsError(err instanceof ApiError ? err.message : 'Не удалось получить статистику')
+    }
+  }, [])
+
+  // первичная загрузка + поллинг статуса и статистики, пока идёт прогон
   useEffect(() => {
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
 
     const tick = () => {
-      void refresh()
-        .then((current) => {
+      void refreshStatus()
+        .then(async (current) => {
+          if (current.state === 'running') await refreshStats()
           if (!disposed && current.state === 'running') {
             timer = setTimeout(tick, POLL_INTERVAL_MS)
           }
@@ -38,13 +57,24 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
           // статус может быть временно недоступен — не роняем экран
         })
     }
-    tick()
+
+    timer = setTimeout(() => {
+      void refreshStats()
+      tick()
+    }, 0)
 
     return () => {
       disposed = true
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [refresh])
+  }, [refreshStatus, refreshStats])
+
+  // тикер прошедшего времени во время прогона
+  useEffect(() => {
+    if (status?.state !== 'running') return
+    const id = setInterval(() => setNowTick(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [status?.state])
 
   const start = async () => {
     const confirmed = window.confirm(
@@ -59,8 +89,9 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
     setError(null)
     try {
       await startIngest()
-      setNotice('Прогон ingestion запущен')
-      await refresh()
+      setNotice('Прогон ingestion запущен. ' + RUNNING_HINT)
+      await refreshStatus()
+      await refreshStats()
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) onUnauthorized()
@@ -73,6 +104,8 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       setBusy(false)
     }
   }
+
+  const running = status?.state === 'running'
 
   return (
     <section className="admin-page">
@@ -113,10 +146,15 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
         </details>
 
         <div className="admin-controls">
-          <button className="btn btn-primary" disabled={busy || status?.state === 'running'} onClick={() => void start()}>
+          <button className="btn btn-primary" disabled={busy || running} onClick={() => void start()}>
             {busy ? 'Запуск…' : 'Запустить ingestion'}
           </button>
           <StateBadge state={status?.state} />
+          {running && status?.started_at !== null && status?.started_at !== undefined && (
+            <span className="mono muted" title={RUNNING_HINT}>
+              идёт {formatElapsed(status.started_at, nowTick)}
+            </span>
+          )}
         </div>
 
         {notice !== null && <div className="info-box">{notice}</div>}
@@ -134,10 +172,12 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
             <dd className="mono">{formatDate(status.finished_at)}</dd>
             <dt>Ошибка</dt>
             <dd className="mono">{status.error ?? '—'}</dd>
-            <dt>Статистика</dt>
+            <dt>Статистика прогона</dt>
             <dd>
               {status.stats != null ? (
                 <pre className="stats mono">{JSON.stringify(status.stats, null, 2)}</pre>
+              ) : running ? (
+                '— считается; счётчики хранилищ ниже обновляются автоматически'
               ) : (
                 '—'
               )}
@@ -145,9 +185,46 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
           </dl>
         )}
 
+        <h3 className="stats-title">Состояние хранилищ</h3>
+        <p className="muted stats-subtitle">
+          Текущее наполнение БД (GET /admin/stats): векторы Qdrant, узлы/рёбра графа Neo4j,
+          пользователи и история диалогов PG.
+        </p>
+        {statsError !== null && <div className="error-box">{statsError}</div>}
+        {stats === null ? (
+          <p className="muted">{statsError === null ? 'Загрузка…' : ''}</p>
+        ) : (
+          <div className="stat-grid">
+            <StatTile label={`Qdrant · ${stats.qdrant.collection}`} value={stats.qdrant.points} hint="векторов чанков" />
+            <StatTile label="Neo4j · Act" value={stats.neo4j.acts} hint="актов" />
+            <StatTile label="Neo4j · Authority" value={stats.neo4j.authorities} hint="органов власти" />
+            <StatTile label="Neo4j · Topic" value={stats.neo4j.topics} hint="тем" />
+            <StatTile label="Neo4j · Concept" value={stats.neo4j.concepts} hint="понятий (LLM)" />
+            <StatTile label="Neo4j · рёбра" value={stats.neo4j.relationships} hint="связей всего" />
+            <StatTile label="PG · пользователи" value={stats.postgres.users} hint="" />
+            <StatTile label="PG · диалоги" value={stats.postgres.chat_sessions} hint="chat_sessions" />
+            <StatTile label="PG · сообщения" value={stats.postgres.chat_messages} hint="chat_messages" />
+          </div>
+        )}
+        <div className="admin-controls">
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => void refreshStats()}>
+            Обновить статистику
+          </button>
+        </div>
+
         <p className="hint muted">Статус обновляется автоматически каждые {POLL_INTERVAL_MS / 1000} с во время прогона</p>
       </div>
     </section>
+  )
+}
+
+function StatTile({ label, value, hint }: { label: string; value: number; hint: string }) {
+  return (
+    <div className="stat-tile" title={label}>
+      <span className="stat-value mono">{value.toLocaleString('ru-RU')}</span>
+      <span className="stat-label">{label}</span>
+      {hint.length > 0 && <span className="stat-hint muted">{hint}</span>}
+    </div>
   )
 }
 
@@ -165,4 +242,15 @@ function formatDate(value: string | null | undefined): string {
   } catch {
     return value
   }
+}
+
+function formatElapsed(startedAt: string, nowMs: number): string {
+  const started = new Date(startedAt).getTime()
+  if (Number.isNaN(started)) return ''
+  let sec = Math.max(0, Math.floor((nowMs - started) / 1000))
+  const min = Math.floor(sec / 60)
+  sec %= 60
+  const hours = Math.floor(min / 60)
+  const mm = min % 60
+  return hours > 0 ? `${hours} ч ${mm} мин` : `${min} мин ${sec.toString().padStart(2, '0')} с`
 }

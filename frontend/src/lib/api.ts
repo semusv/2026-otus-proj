@@ -17,6 +17,7 @@ export type TokenResponse = components['schemas']['TokenResponse']
 export type IngestStartResponse = components['schemas']['IngestStartResponse']
 export type IngestStatusResponse = components['schemas']['IngestStatusResponse']
 export type ChatRequest = components['schemas']['ChatRequest']
+export type StorageStats = components['schemas']['StorageStatsResponse']
 
 export class ApiError extends Error {
   readonly status: number
@@ -127,6 +128,11 @@ export function startIngest(): Promise<IngestStartResponse> {
 
 export function ingestStatus(): Promise<IngestStatusResponse> {
   return request<IngestStatusResponse>('/admin/ingest/status')
+}
+
+/** Агрегаты наполнения хранилищ (Qdrant/Neo4j/PG) — admin-only, этап 8. */
+export function storageStats(): Promise<StorageStats> {
+  return request<StorageStats>('/admin/stats')
 }
 
 /**
