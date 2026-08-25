@@ -39,7 +39,17 @@ async def one_call(client: AsyncOpenAI, sem: asyncio.Semaphore | None) -> dict[s
     }
     async with sem if sem else _NullCtx():
         t0 = time.perf_counter()
-        resp = await client.chat.completions.create(**payload, timeout=TIMEOUT_S)
+        # LM Studio при JIT-загрузке модели может ответить 400 "Model reloaded."
+        # (тот же плавающий сбой, что лечится ретраем в app/llm/client.py)
+        for attempt in range(3):
+            try:
+                resp = await client.chat.completions.create(**payload, timeout=TIMEOUT_S)
+                break
+            except Exception as exc:
+                if attempt == 2:
+                    raise
+                delay = 2.0 * (attempt + 1) if "reload" in str(exc).lower() else 0.5
+                await asyncio.sleep(delay)
         dt = time.perf_counter() - t0
     completion_tokens = int(getattr(resp.usage, "completion_tokens", 0) or 0)
     return {
