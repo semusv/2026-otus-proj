@@ -167,7 +167,7 @@
 > LLM-эндпоинт конфигурируется переменными `APP_LLM_BASE_URL/APP_LLM_MODEL`; в dev-режиме
 > используется LM Studio на хосте. См. ADR-001, раздел «Дополнение».
 
-### [ ] Этап 3. Фундамент бэкенда
+### [x] Этап 3. Фундамент бэкендa
 **Deliverables:** app factory, pydantic-settings (fail-fast валидация `APP_*` конфига на старте), SQLAlchemy-модели (users, roles, sessions, audit_log), миграции (alembic или create_all для MVP), `POST /auth/login` (JWT), `GET /auth/me`, middleware: request-id/trace-correlation (`X-Trace-Id` входящий/эхо в ответ, `X-Request-Id`) + структурное JSON-логирование с инъекцией `trace_id`/`request_id` в каждую строку. Сид-скрипт 3 пользователей (viewer/analyst/admin), структура модулей из схемы выше. Настроить ruff + mypy + pre-commit + Makefile (`lint`, `test-*`) — далее это gate всех этапов.
 **OpenAPI:** настроить метаданные FastAPI (title/version/description, теги), скрипт `scripts/export_openapi.py` → `docs/api/openapi.yaml` (коммитится), Swagger UI проверен через Traefik. Postman-коллекция этапа создаётся импортом из openapi.yaml.
 **Acceptance:** логин выдаёт валидный JWT, `/auth/me` возвращает роль; `make lint` и pytest зелёные; запуск без обязательных env падает с понятной ошибкой валидации; `docs/api/openapi.yaml` содержит auth-эндпоинты со схемами ошибок.
