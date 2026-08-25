@@ -1,0 +1,512 @@
+{
+  "info": {
+    "_postman_id": "b7e2c1a0-0000-4a1a-9f00-graphrag00001",
+    "name": "GraphRAG — RBAC и пользователи (этап 8)",
+    "description": "Сквозной сценарий проверки доступов:\n1. Два пользователя с разными ролями (viewer=PUBLIC, analyst=PUBLIC+INTERNAL).\n2. Admin управляет учётками (создание, список); не-админам — 403, анонимам — 401.\n3. Саморегистрация всегда даёт минимальную роль viewer.\n4. SSE-чат: у viewer все цитаты PUBLIC, у analyst SECRET не появляется.\n\nЗапуск: коллекция по порядку (Postman Runner) или `make postman-run` (newman). Нужен запущенный стек на {{baseURL}} и наполненный корпус для чат-запросов.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// уникальный суффикс пользователей на весь прогон (повторный запуск не конфликтует)",
+          "if (!pm.collectionVariables.get(\"run_id\")) {",
+          "  pm.collectionVariables.set(\"run_id\", Date.now().toString());",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "adminToken", "value": "" },
+    { "key": "tokenA", "value": "" },
+    { "key": "tokenB", "value": "" },
+    { "key": "tokenC", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "00 Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseURL}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Login admin",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"admin\",\"password\":\"admin123\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 и роль admin\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().role).to.eql(\"admin\");",
+              "});",
+              "pm.collectionVariables.set(\"adminToken\", pm.response.json().access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Admin создаёт user A (viewer)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": "{{baseURL}}/admin/users",
+        "description": "Роль viewer -> метки доступа только PUBLIC.",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_view_{{run_id}}\",\"password\":\"qaview123\",\"role\":\"viewer\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"201, viewer, только PUBLIC, без секретов в ответе\", () => {",
+              "  pm.response.to.have.status(201);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.role).to.eql(\"viewer\");",
+              "  pm.expect(body.clearances).to.eql([\"PUBLIC\"]);",
+              "  pm.expect(JSON.stringify(body)).to.not.include(\"password\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Дубликат имени -> 409",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": "{{baseURL}}/admin/users",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_view_{{run_id}}\",\"password\":\"qaview123\",\"role\":\"viewer\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"409 занято\", () => pm.response.to.have.status(409));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Admin создаёт user B (analyst)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": "{{baseURL}}/admin/users",
+        "description": "Роль analyst -> PUBLIC + INTERNAL.",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_analyst_{{run_id}}\",\"password\":\"qaanls123\",\"role\":\"analyst\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"201, analyst, INTERNAL+PUBLIC\", () => {",
+              "  pm.response.to.have.status(201);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.role).to.eql(\"analyst\");",
+              "  pm.expect(body.clearances).to.eql([\"INTERNAL\", \"PUBLIC\"]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Login user A",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_view_{{run_id}}\",\"password\":\"qaview123\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200, роль viewer\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().role).to.eql(\"viewer\");",
+              "});",
+              "pm.collectionVariables.set(\"tokenA\", pm.response.json().access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Me user A",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenA}}" }],
+        "url": "{{baseURL}}/auth/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"профиль A: только PUBLIC\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().clearances).to.eql([\"PUBLIC\"]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Login user B",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_analyst_{{run_id}}\",\"password\":\"qaanls123\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200, роль analyst\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().role).to.eql(\"analyst\");",
+              "});",
+              "pm.collectionVariables.set(\"tokenB\", pm.response.json().access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Me user B",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenB}}" }],
+        "url": "{{baseURL}}/auth/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"профиль B: INTERNAL+PUBLIC\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().clearances).to.eql([\"INTERNAL\", \"PUBLIC\"]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 User A не видит список пользователей",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenA}}" }],
+        "url": "{{baseURL}}/admin/users"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"403\", () => pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 User A не может создать admin (эскалация)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{tokenA}}" }
+        ],
+        "url": "{{baseURL}}/admin/users",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"hacker_{{run_id}}\",\"password\":\"hack12345\",\"role\":\"admin\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"403 эскалация запрещена\", () => pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Chat user A (SSE, только PUBLIC-цитаты)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{tokenA}}" },
+          { "key": "X-Trace-Id", "value": "postman-trace-a-{{run_id}}" }
+        ],
+        "url": "{{baseURL}}/api/chat",
+        "description": "Ответ стримится (text/event-stream): статус -> токены -> done. Тест разбирает done-кадр.",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"message\":\"Найди источники по теме и кратко перечисли\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const raw = pm.response.text();",
+              "let done = null;",
+              "for (const line of raw.split(/\\r?\\n/)) {",
+              "  if (!line.startsWith(\"data:\")) continue;",
+              "  try {",
+              "    const frame = JSON.parse(line.slice(5).trim());",
+              "    if (frame.type === \"done\") done = frame;",
+              "  } catch (e) {}",
+              "}",
+              "pm.test(\"есть done-кадр\", () => pm.expect(done).to.not.be.null);",
+              "if (done) {",
+              "  pm.test(\"эхо X-Trace-Id\", () => pm.expect(pm.response.headers.get(\"x-trace-id\") || \"\").to.include(\"postman-trace-a\"));",
+              "  pm.test(\"все цитаты только PUBLIC\", () => {",
+              "    for (const c of done.citations || []) {",
+              "      pm.expect(c.clearance).to.eql(\"PUBLIC\");",
+              "    }",
+              "  });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Chat user B (SSE, без SECRET)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{tokenB}}" },
+          { "key": "X-Trace-Id", "value": "postman-trace-b-{{run_id}}" }
+        ],
+        "url": "{{baseURL}}/api/chat",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"message\":\"Найди источники по теме и кратко перечисли\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const raw = pm.response.text();",
+              "let done = null;",
+              "for (const line of raw.split(/\\r?\\n/)) {",
+              "  if (!line.startsWith(\"data:\")) continue;",
+              "  try {",
+              "    const frame = JSON.parse(line.slice(5).trim());",
+              "    if (frame.type === \"done\") done = frame;",
+              "  } catch (e) {}",
+              "}",
+              "pm.test(\"есть done-кадр\", () => pm.expect(done).to.not.be.null);",
+              "if (done) {",
+              "  pm.test(\"аналитик: ни одной SECRET-цитаты\", () => {",
+              "    for (const c of done.citations || []) {",
+              "      pm.expect([\"PUBLIC\", \"INTERNAL\"]).to.include(c.clearance);",
+              "    }",
+              "  });",
+              "  pm.test(\"есть цитаты\", () => pm.expect((done.citations || []).length).to.be.at.least(1));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Публичная регистрация user C",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_self_{{run_id}}\",\"password\":\"selfpass123\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"201 сразу с JWT, роль viewer\", () => {",
+              "  pm.response.to.have.status(201);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.role).to.eql(\"viewer\");",
+              "});",
+              "pm.collectionVariables.set(\"tokenC\", pm.response.json().access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Повторная регистрация -> 409",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_self_{{run_id}}\",\"password\":\"selfpass123\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"409 занято\", () => pm.response.to.have.status(409));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Слабый пароль -> 422",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"qa_weak_{{run_id}}\",\"password\":\"short\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"422 валидация\", () => pm.response.to.have.status(422));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Неверный пароль -> 401",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseURL}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"username\":\"admin\",\"password\":\"wrong-password\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Аноним к admin API -> 401",
+      "request": {
+        "method": "GET",
+        "url": "{{baseURL}}/admin/users"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+          }
+        }
+      ]
+    }
+  ]
+}

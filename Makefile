@@ -5,7 +5,7 @@
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 
-.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install frontend-install frontend-lint frontend-test frontend-build openapi-types
+.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install frontend-install frontend-lint frontend-test frontend-build openapi-types postman-run
 
 help:
 	@echo "lint              - ruff check + mypy (gate всех этапов)"
@@ -23,6 +23,7 @@ help:
 	@echo "frontend-test     - vitest smoke для frontend"
 	@echo "frontend-build    - production build SPA"
 	@echo "openapi-types     - регенерация типов фронта из docs/api/openapi.yaml"
+	@echo "postman-run       - прогнать Postman-коллекцию (newman) против запущенного стека"
 
 lint:
 	cd $(BACKEND_DIR) && uv run ruff check .
@@ -77,3 +78,6 @@ frontend-build:
 
 openapi-types:
 	cd $(FRONTEND_DIR) && npm run gen:api
+
+postman-run:
+	npx --yes newman run postman/graphrag.postman_collection.json -e postman/local.postman_environment.json
