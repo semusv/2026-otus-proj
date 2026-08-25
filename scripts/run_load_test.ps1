@@ -10,20 +10,34 @@ param(
     [string]$Profile = "both",
     [string]$BaseUrl = "http://api.localhost",
     [int]$HealthUsers = 25,
-    [int]$ChatUsers = 4
+    [int]$HealthSeconds = 60,
+    [int]$ChatUsers = 4,
+    [int]$ChatSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$locustfile = Join-Path $PSScriptRoot "locustfile.py"
+$loadTestDir = Join-Path $PSScriptRoot "load_test"
+$locustfile = Join-Path $loadTestDir "locustfile.py"
 $LOCUST_VERSION = "2.32.4"
 
-$resultsRoot = Join-Path $PSScriptRoot "results"
+$resultsRoot = Join-Path $loadTestDir "results"
 New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
 
 function Invoke-DockerStats([string]$Path) {
-    docker stats --no-stream --format "{{.Name}}`tCPU={{.CPUPerc}}`tMEM={{.MemUsage}}" |
-        Select-String graphrag | ForEach-Object { $_.Line } | Set-Content -Path $Path -Encoding UTF8
+    # снапшот не должен ронять прогон: при нехватке памяти хоста docker.exe
+    # может не стартовать (paging file too small) - фиксируем пустой файл
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = docker stats --no-stream --format "{{.Name}}`tCPU={{.CPUPerc}}`tMEM={{.MemUsage}}" 2>$null |
+            Select-String graphrag | ForEach-Object { $_.Line }
+        if ($null -ne $lines) { $lines | Set-Content -Path $Path -Encoding UTF8 }
+    } catch {
+        Write-Host "== docker stats недоступен: $($_.Exception.Message)"
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
 }
 
 function Invoke-Profile([string]$Name, [int]$Users, [double]$SpawnRate, [int]$RunSeconds) {
@@ -57,14 +71,15 @@ function Invoke-Profile([string]$Name, [int]$Users, [double]$SpawnRate, [int]$Ru
         Write-Host "== locust не завершился сам - убиваю (защита от зависания)"
         Stop-Process -Id $proc.Id -Force
     }
+    $proc.Refresh()
     Invoke-DockerStats (Join-Path $outDir "docker-stats-after.txt")
     Write-Host "== [$Name] готово: $outDir (exit=$($proc.ExitCode))"
 }
 
 if ($Profile -in @("health", "both")) {
-    Invoke-Profile "health" $HealthUsers 5 60
+    Invoke-Profile "health" $HealthUsers 5 $HealthSeconds
 }
 if ($Profile -in @("chat", "both")) {
-    Invoke-Profile "chat" $ChatUsers 1 180
+    Invoke-Profile "chat" $ChatUsers 1 $ChatSeconds
 }
 Write-Host "== нагрузочные прогоны завершены"
