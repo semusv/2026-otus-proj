@@ -555,7 +555,16 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
   на бэкенде) — тело запроса писать в UTF-8 файл и слать `--data-binary '@file'`;
 - loadEnv импортируется из 'vite', defineConfig c полем test — из 'vitest/config';
 - comment-only SSE-кадр (`: ping`) по спецификации не диспатчится — парсер отдаёт фрейм
-  только при наличии data-строк.
+  только при наличии data-строк;
+- «зависший» ingestion = нормальный долгий прогон (CPU-эмбеддинги corpus_test ~10–30 мин):
+  статус хранится В ПАМЯТИ backend (перезапуск контейнера сбрасывает в idle), прогресс —
+  только в логах → в Admin добавлены таймер прогона и подсказка; для текущего наполнения БД
+  сделан admin-only `GET /admin/stats` (эволюция контракта, openapi.yaml переэкспортирован);
+- eslint-plugin-react-hooks v6 (`set-state-in-effect`): стартовый вызов поллинга из useEffect —
+  через setTimeout(…, 0), иначе gate красный;
+- интерактивность цитат `[S#]` ↔ карточки источников решается чисто на фронте (split по
+  маркерам + data-атрибуты + scrollIntoView); полный просмотр документа потребовал бы
+  эндпоинта контента акта — кандидат в будущие этапы.
 
 ### [ ] Этап 9. E2E Postman + нагрузочный отчёт
 **Deliverables:** полная коллекция Postman (`tests/postman/`: env local, сценарии auth → ingest status → chat RBAC → health/metrics), прогон через Newman CLI `scripts/run_postman.(ps1|sh)`. Нагрузочный тест (locust или k6) на `/api/chat` (non-stream) и `/health` → `docs/load-report.md` (RPS, p50/p95, токены/сек на RTX 5070 Ti).
