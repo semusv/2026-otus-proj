@@ -65,6 +65,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /auth/register:
+    post:
+      tags:
+      - auth
+      summary: 'Саморегистрация: роль viewer (только PUBLIC), JWT выдаётся сразу'
+      description: 'Открытая регистрация умышленно даёт минимальную роль viewer.
+
+
+        Расширение доступа (analyst/admin) — только через администратора:
+
+        POST /admin/users. Аудит: auth.register.'
+      operationId: register_auth_register_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '409':
+          description: Имя пользователя занято
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Неверный формат имени/пароля
   /auth/me:
     get:
       tags:
@@ -131,6 +164,50 @@ paths:
                 $ref: '#/components/schemas/StorageStatsResponse'
         '403':
           description: Не admin
+  /admin/users:
+    get:
+      tags:
+      - admin
+      summary: Список учётных записей (без секретов)
+      operationId: list_users_admin_users_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsersListResponse'
+        '403':
+          description: Не admin
+    post:
+      tags:
+      - admin
+      summary: Создать учётную запись с указанной ролью
+      description: 'Роль задаёт метки доступа: viewer→PUBLIC, analyst→PUBLIC+INTERNAL, admin→все.'
+      operationId: add_user_admin_users_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOut'
+        '403':
+          description: Не admin
+        '409':
+          description: Имя занято
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/chat:
     post:
       tags:
@@ -430,6 +507,89 @@ components:
         role: analyst
         token_type: bearer
         username: analyst
+    UserCreate:
+      properties:
+        username:
+          type: string
+          maxLength: 64
+          minLength: 3
+          pattern: ^[a-zA-Z0-9_.-]+$
+          title: Username
+          description: Имя пользователя (уникально)
+        password:
+          type: string
+          maxLength: 72
+          minLength: 8
+          title: Password
+          description: Пароль (bcrypt на сервере)
+        role:
+          type: string
+          enum:
+          - viewer
+          - analyst
+          - admin
+          title: Role
+          description: Роль определяет метки доступа
+          default: viewer
+      type: object
+      required:
+      - username
+      - password
+      title: UserCreate
+      description: Создание учётной записи администратором.
+      examples:
+      - password: qa123456
+        role: viewer
+        username: qa_viewer
+    UserOut:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        username:
+          type: string
+          title: Username
+        role:
+          type: string
+          enum:
+          - viewer
+          - analyst
+          - admin
+          title: Role
+        clearances:
+          items:
+            type: string
+          type: array
+          title: Clearances
+          description: Метки доступа роли
+        is_active:
+          type: boolean
+          title: Is Active
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - user_id
+      - username
+      - role
+      - clearances
+      - is_active
+      - created_at
+      title: UserOut
+      description: Учётная запись без секретов.
+    UsersListResponse:
+      properties:
+        users:
+          items:
+            $ref: '#/components/schemas/UserOut'
+          type: array
+          title: Users
+      type: object
+      required:
+      - users
+      title: UsersListResponse
     ValidationError:
       properties:
         loc:

@@ -12,7 +12,8 @@ from app.config import Settings
 from app.core.errors import InvalidCredentialsError
 from app.core.security import create_access_token, resolve_clearances, verify_password
 from app.db.base import get_session, new_pk
-from app.db.models import AuditLog, AuthSession, User
+from app.db.models import AuditLog, AuthSession, RoleName, User
+from app.db.users import create_user
 from app.schemas.auth import LoginRequest, MeResponse, TokenResponse
 from app.schemas.errors import ErrorResponse
 
@@ -95,6 +96,57 @@ async def login(
         expires_in=ttl_minutes * 60,
         username=user.username,
         role=user.role.name.value,
+    )
+
+
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=201,
+    responses={
+        409: {"model": ErrorResponse, "description": "Имя пользователя занято"},
+        422: {"description": "Неверный формат имени/пароля"},
+    },
+    summary="Саморегистрация: роль viewer (только PUBLIC), JWT выдаётся сразу",
+)
+async def register(
+    payload: LoginRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> TokenResponse:
+    """Открытая регистрация умышленно даёт минимальную роль viewer.
+
+    Расширение доступа (analyst/admin) — только через администратора:
+    POST /admin/users. Аудит: auth.register.
+    """
+    settings: Settings = request.app.state.settings
+
+    user = await create_user(
+        session, username=payload.username, password=payload.password, role_name=RoleName.VIEWER
+    )
+    ttl_minutes = settings.jwt_ttl_minutes
+    auth_session = AuthSession(
+        id=new_pk(),
+        user_id=user.id,
+        issued_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=ttl_minutes),
+    )
+    token = create_access_token(
+        user_id=user.id,
+        role=RoleName.VIEWER.value,
+        session_id=auth_session.id,
+        secret=settings.jwt_secret.get_secret_value(),
+        ttl_minutes=ttl_minutes,
+    )
+    session.add(auth_session)
+    await _audit(session, "auth.register", user.id, {"username": user.username})
+    await session.commit()
+
+    return TokenResponse(
+        access_token=token,
+        expires_in=ttl_minutes * 60,
+        username=user.username,
+        role=RoleName.VIEWER.value,
     )
 
 

@@ -25,9 +25,9 @@ def test_rrf_boosts_items_in_both_rankings() -> None:
     graph = [make_chunk("b", 0, 0.5)]
     fused = fuse_rankings(vector, graph)
     ids = [(chunk.act_id, chunk.chunk_no) for chunk in fused]
-    # b присутствует в обоих ранжированиях -> поднимается выше c
-    assert ids[0] == ("a", 0)
-    assert ("b", 0) in ids[:2]
+    # b в обоих ранжированиях: 1/(k+2)+1/(k+1) > 1/(k+1) у a -> b наверх,
+    # далее исходный порядок вектора (a, c)
+    assert ids == [("b", 0), ("a", 0), ("c", 0)]
 
 
 def test_dedup_prefers_vector_record() -> None:

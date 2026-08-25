@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class IngestStartResponse(BaseModel):
@@ -50,3 +50,40 @@ class StorageStatsResponse(BaseModel):
     qdrant: QdrantStats
     neo4j: Neo4jStats
     postgres: PostgresStats
+
+
+RoleLiteral = Literal["viewer", "analyst", "admin"]
+
+
+class UserCreate(BaseModel):
+    """Создание учётной записи администратором."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"username": "qa_viewer", "password": "qa123456", "role": "viewer"}]
+        }
+    )
+
+    username: str = Field(
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+        description="Имя пользователя (уникально)",
+    )
+    password: str = Field(min_length=8, max_length=72, description="Пароль (bcrypt на сервере)")
+    role: RoleLiteral = Field(default="viewer", description="Роль определяет метки доступа")
+
+
+class UserOut(BaseModel):
+    """Учётная запись без секретов."""
+
+    user_id: str
+    username: str
+    role: RoleLiteral
+    clearances: list[str] = Field(description="Метки доступа роли")
+    is_active: bool
+    created_at: datetime
+
+
+class UsersListResponse(BaseModel):
+    users: list[UserOut]

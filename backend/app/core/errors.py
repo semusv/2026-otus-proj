@@ -50,6 +50,12 @@ class IngestAlreadyRunningError(AppError):
     message = "Прогон ingestion уже выполняется"
 
 
+class UserExistsError(AppError):
+    code = "user_exists"
+    status_code = 409
+    message = "Пользователь с таким именем уже существует"
+
+
 def _error_body(
     code: str,
     message: str,

@@ -14,12 +14,15 @@ from fastapi import APIRouter, Depends, Request
 from qdrant_client import AsyncQdrantClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
-from app.api.deps import get_current_user
+from app.api.deps import audit_context, get_current_user
 from app.config import Settings
 from app.core.errors import ForbiddenError, IngestAlreadyRunningError
+from app.core.security import resolve_clearances
 from app.db.base import get_session
-from app.db.models import ChatMessage, ChatSession, User
+from app.db.models import AuditLog, ChatMessage, ChatSession, RoleName, User
+from app.db.users import create_user
 from app.ingestion.pipeline import run_ingestion
 from app.schemas.admin import (
     IngestStartResponse,
@@ -28,6 +31,9 @@ from app.schemas.admin import (
     PostgresStats,
     QdrantStats,
     StorageStatsResponse,
+    UserCreate,
+    UserOut,
+    UsersListResponse,
 )
 
 logger = logging.getLogger("app.api.admin")
@@ -63,8 +69,15 @@ async def start_ingest(
 
     settings: Settings = request.app.state.settings
     corpus_dir = Path(settings.ingest_corpus_dir)
-    state.update({"state": "running", "started_at": datetime.now(UTC), "finished_at": None,
-                  "stats": None, "error": None})
+    state.update(
+        {
+            "state": "running",
+            "started_at": datetime.now(UTC),
+            "finished_at": None,
+            "stats": None,
+            "error": None,
+        }
+    )
 
     async def _job() -> None:
         try:
@@ -114,12 +127,8 @@ async def storage_stats(
     neo4j_counts = await graph_retriever.stats()
 
     users_count = int(await session.scalar(select(func.count()).select_from(User)) or 0)
-    sessions_count = int(
-        await session.scalar(select(func.count()).select_from(ChatSession)) or 0
-    )
-    messages_count = int(
-        await session.scalar(select(func.count()).select_from(ChatMessage)) or 0
-    )
+    sessions_count = int(await session.scalar(select(func.count()).select_from(ChatSession)) or 0)
+    messages_count = int(await session.scalar(select(func.count()).select_from(ChatMessage)) or 0)
 
     return StorageStatsResponse(
         qdrant=QdrantStats(
@@ -133,3 +142,70 @@ async def storage_stats(
             chat_messages=messages_count,
         ),
     )
+
+
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        user_id=str(user.id),
+        username=user.username,
+        role=user.role.name.value,
+        clearances=resolve_clearances(user.role.name),
+        is_active=user.is_active,
+        created_at=user.created_at,
+    )
+
+
+@router.get(
+    "/users",
+    response_model=UsersListResponse,
+    summary="Список учётных записей (без секретов)",
+    responses={403: {"description": "Не admin"}},
+)
+async def list_users(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UsersListResponse:
+    _require_admin(user)
+    rows = (
+        (
+            await session.execute(
+                select(User).options(joinedload(User.role)).order_by(User.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return UsersListResponse(users=[_user_out(u) for u in rows])
+
+
+@router.post(
+    "/users",
+    response_model=UserOut,
+    status_code=201,
+    summary="Создать учётную запись с указанной ролью",
+    responses={403: {"description": "Не admin"}, 409: {"description": "Имя занято"}},
+)
+async def add_user(
+    payload: UserCreate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserOut:
+    """Роль задаёт метки доступа: viewer→PUBLIC, analyst→PUBLIC+INTERNAL, admin→все."""
+    _require_admin(user)
+    created = await create_user(
+        session,
+        username=payload.username,
+        password=payload.password,
+        role_name=RoleName(payload.role),
+    )
+    session.add(
+        AuditLog(
+            action="admin.user_created",
+            user_id=user.id,
+            detail={"target": created.username, "role": payload.role},
+            **audit_context(),
+        )
+    )
+    await session.commit()
+    await session.refresh(created, attribute_names=["role"])
+    return _user_out(created)
