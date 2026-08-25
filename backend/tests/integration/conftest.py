@@ -77,7 +77,8 @@ async def itg_client(
 ) -> AsyncIterator[tuple[httpx.AsyncClient, object]]:
     """HTTP-клиент поверх приложения, смотрящего на тестовую БД."""
     test_dbname = pg_dsn.rsplit("/", 1)[1]
-    settings = base_settings.model_copy(update={"pg_db": test_dbname})
+    # трейсинг выключен: OTel-экспорт из хост-процесса в compose-имена недоступен
+    settings = base_settings.model_copy(update={"pg_db": test_dbname, "tracing_enabled": False})
     app = create_app(settings)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

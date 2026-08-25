@@ -71,8 +71,19 @@ async def _stream_generator(
             continue
         if task.done():
             break
-        event, data = await sink.queue.get()
-        yield sse_format(event, data)
+        # ждём ЛИБО новое событие, ЛИБО завершение графа - иначе гонка:
+        # задача может закончиться между проверкой done и ожиданием очереди
+        getter = asyncio.ensure_future(sink.queue.get())
+        done, _ = await asyncio.wait({getter, task}, return_when=asyncio.FIRST_COMPLETED)
+        if getter in done:
+            event, data = getter.result()
+            yield sse_format(event, data)
+        else:
+            getter.cancel()
+            try:
+                await getter
+            except asyncio.CancelledError:
+                pass
 
     while not sink.queue.empty():
         event, data = sink.queue.get_nowait()
@@ -145,10 +156,10 @@ async def chat(
         span.set_attribute("chat.role", str(user.role.name))
         span.set_attribute("chat.stream", body.stream)
 
-        graph = build_agent_graph(runtime)
         initial_state = _initial_state(runtime, user, body, history, chat_session.id)
 
         if not body.stream:
+            graph = build_agent_graph(runtime)
             final = await graph.ainvoke(initial_state)
             trace_id = get_trace_id()
             await runtime.memory.save_turn(
@@ -170,6 +181,7 @@ async def chat(
             )
 
         sink = QueueSink()
+        graph = build_agent_graph(runtime, sink=sink)
         task = asyncio.create_task(graph.ainvoke(initial_state))
         return StreamingResponse(
             _stream_generator(runtime, task, sink, session_id=chat_session.id,
