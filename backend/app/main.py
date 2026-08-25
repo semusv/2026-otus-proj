@@ -14,7 +14,7 @@ from app.core.errors import setup_error_handlers
 from app.core.logging import configure_logging
 from app.db.base import Database
 from app.middleware.correlation import CorrelationIdMiddleware
-from app.observability.tracing import setup_tracing
+from app.observability.tracing import instrument_libraries, setup_tracing
 from app.rag.retrievers import GraphRetriever
 
 
@@ -71,4 +71,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.qdrant_client = qdrant_client
 
     app.include_router(api_router)
+
+    if cfg.tracing_enabled:
+        # httpx (OpenAI SDK/qdrant/langfuse) + SQLAlchemy: исходящие спаны в том же трейсе
+        instrument_libraries(db_engine=app.state.db.engine)
     return app

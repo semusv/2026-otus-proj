@@ -1,11 +1,13 @@
-"""Correlation-middleware: сквозные идентификаторы запроса.
+"""Correlation-middleware: сквозные идентификаторы запроса + серверный OTel-span.
 
 - ``X-Trace-Id`` — входящий от клиента (или из ``traceparent``), иначе генерируется;
   всегда эхом возвращается в ответе;
-- ``X-Request-Id`` — идентификатор конкретного HTTP-запроса (генерируется, если не передан).
+- ``X-Request-Id`` — идентификатор конкретного HTTP-запроса (генерируется, если не передан);
+- серверный span создаётся здесь (а не FastAPI-instrumentor'ом), чтобы trace_id трейса
+  совпадал с ``X-Trace-Id``: W3C extract -> X-Trace-Id -> генерация (см. observability.tracing).
 
 Оба значения кладутся в contextvar'ы и попадают в каждую лог-строку.
-Чистый ASGI-middleware (не BaseHTTPMiddleware) — безопасен для будущего SSE-стриминга.
+Чистый ASGI-middleware (не BaseHTTPMiddleware) — безопасен для SSE-стриминга.
 """
 
 import logging
@@ -17,6 +19,7 @@ from typing import Any
 from starlette.datastructures import Headers, MutableHeaders
 
 from app.core.context import set_request_id, set_trace_id
+from app.observability.tracing import normalize_trace_id, server_span
 
 logger = logging.getLogger("app.access")
 
@@ -24,15 +27,20 @@ _SCOPE_HTTP = "http"
 
 
 def _trace_from_headers(headers: Headers) -> str:
-    trace_id = headers.get("x-trace-id")
-    if trace_id:
-        return trace_id
+    """X-Trace-Id для логов/эха: из заголовка, из traceparent или сгенерированный.
+
+    Валидируется normalize_trace_id - в логах всегда валидный 32-hex,
+    совпадающий с trace id серверного спана.
+    """
+    direct = headers.get("x-trace-id")
+    if direct and normalize_trace_id(direct):
+        return normalize_trace_id(direct) or uuid.uuid4().hex
     traceparent = headers.get("traceparent")
     if traceparent:
         # формат W3C: 00-<32 hex trace-id>-<16 hex span-id>-01
         parts = traceparent.split("-")
-        if len(parts) == 4 and len(parts[1]) == 32:
-            return parts[1]
+        if len(parts) == 4 and len(parts[1]) == 32 and int(parts[1], 16) != 0:
+            return parts[1].lower()
     return uuid.uuid4().hex
 
 
@@ -69,7 +77,15 @@ class CorrelationIdMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_wrapper)
+            with server_span(method=scope.get("method", "-"), path=scope.get("path", "-"),
+                             headers=headers) as span:
+                try:
+                    await self.app(scope, receive, send_wrapper)
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_attribute("http.request.error", True)
+                    raise
+                span.set_attribute("http.response.status_code", status_holder["status"])
         finally:
             duration_ms = (time.perf_counter() - started) * 1000
             path = scope.get("path", "-")

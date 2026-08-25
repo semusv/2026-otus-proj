@@ -43,7 +43,7 @@ test-unit:
 	cd $(BACKEND_DIR) && uv run pytest -m unit
 
 test-integration:
-	cd $(BACKEND_DIR) && uv run pytest -m integration
+	cd $(BACKEND_DIR) && uv run pytest -m integration --timeout=300
 
 test-all: test-unit test-integration
 

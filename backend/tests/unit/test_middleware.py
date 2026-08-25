@@ -26,9 +26,26 @@ def test_generated_ids_on_plain_request(settings: Settings) -> None:
     assert resp.headers["X-Trace-Id"] != resp.headers["X-Request-Id"]
 
 
-def test_trace_id_echoed(settings: Settings) -> None:
-    resp = client(settings).get("/health", headers={"X-Trace-Id": "my-trace-123"})
-    assert resp.headers["X-Trace-Id"] == "my-trace-123"
+def test_trace_id_echoed_valid_hex(settings: Settings) -> None:
+    """Валидный 32-hex проходит как есть (этап 7: == trace id трейса)."""
+    tid = "4bf92f3577b34da6a3ce929d0e0e4736"
+    resp = client(settings).get("/health", headers={"X-Trace-Id": tid})
+    assert resp.headers["X-Trace-Id"] == tid
+
+
+def test_trace_id_arbitrary_normalized_deterministically(settings: Settings) -> None:
+    """Произвольная строка хешируется sha256 -> стабильный валидный 32-hex."""
+    resp1 = client(settings).get("/health", headers={"X-Trace-Id": "my-trace-123"})
+    resp2 = client(settings).get("/health", headers={"X-Trace-Id": "my-trace-123"})
+    assert HEX32.match(resp1.headers["X-Trace-Id"])
+    assert resp1.headers["X-Trace-Id"] == resp2.headers["X-Trace-Id"]
+    assert resp1.headers["X-Trace-Id"] != "my-trace-123"
+
+
+def test_trace_id_zero_guid_falls_back_to_random(settings: Settings) -> None:
+    resp = client(settings).get("/health", headers={"X-Trace-Id": "0" * 32})
+    assert HEX32.match(resp.headers["X-Trace-Id"])
+    assert resp.headers["X-Trace-Id"] != "0" * 32
 
 
 def test_trace_id_from_traceparent_fallback(settings: Settings) -> None:
