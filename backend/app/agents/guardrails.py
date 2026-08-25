@@ -170,6 +170,45 @@ def extract_citations(answer: str, sources: list[ContextSource]) -> GuardrailOut
                               dropped_citations=dropped)
 
 
+# --- Финальный ACL-инвариант на границе API (этап 6, Security-by-Design) ---
+
+
+@dataclass(frozen=True)
+class AclBoundaryResult:
+    """Результат применения ACL-инварианта к ответу графа."""
+
+    sources: list[ContextSource] = field(default_factory=list)
+    related_acts: list[dict[str, str]] = field(default_factory=list)
+    dropped_ids: list[str] = field(default_factory=list)
+
+    @property
+    def violated(self) -> bool:
+        return bool(self.dropped_ids)
+
+
+def enforce_acl_boundary(
+    sources: list[ContextSource],
+    related_acts: list[dict[str, str]],
+    allowed_clearances: list[str],
+) -> AclBoundaryResult:
+    """Вырезает источники и акты-соседи с меткой вне допустимого множества роли.
+
+    При живых pre-fetch ретриверах нарушение невозможно - проверка страхует ответ
+    от регрессий в любом новом пути retrieval (defense-in-depth): RBAC гарантирован
+    на границе API независимо от поведения инструментов.
+    """
+    allowed = set(allowed_clearances)
+    kept_sources = [source for source in sources if source.clearance in allowed]
+    kept_acts = [act for act in related_acts if act.get("clearance", "") in allowed]
+    dropped = sorted(
+        {source.act_id for source in sources if source.clearance not in allowed}
+        | {str(act.get("id", "")) for act in related_acts
+           if act.get("clearance", "") not in allowed}
+        - {""}
+    )
+    return AclBoundaryResult(sources=kept_sources, related_acts=kept_acts, dropped_ids=dropped)
+
+
 def refusal_answer() -> str:
     return (
         "Запрос отклонён системой безопасности: обнаружены признаки попытки "

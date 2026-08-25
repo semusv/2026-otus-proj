@@ -10,6 +10,7 @@ from qdrant_client import AsyncQdrantClient
 from app.agents.graph import AgentRuntime
 from app.agents.memory import ChatMemory
 from app.config import Settings
+from app.core.audit import ACTION_ACL_VIOLATION, record_denial
 from app.db.base import Database
 from app.ingestion.embeddings import Embedder
 from app.llm.client import LLMClient, LLMConfig
@@ -56,11 +57,17 @@ def build_chat_runtime(settings: Settings, db: Database) -> tuple[AgentRuntime,
     )
     memory = ChatMemory(db)
 
+    async def _audit_acl_violation(detail: dict[str, object]) -> bool:
+        return await record_denial(
+            db.session_factory, action=ACTION_ACL_VIOLATION, detail=detail
+        )
+
     runtime = AgentRuntime(
         settings=settings,
         llm=llm,
         tools=tools,
         reranker=reranker,
         memory=memory,
+        extra={"audit_acl_violation": _audit_acl_violation},
     )
     return runtime, graph_retriever, qdrant_client

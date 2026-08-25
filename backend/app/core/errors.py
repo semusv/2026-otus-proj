@@ -4,6 +4,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.core.audit import ACTION_ACCESS_DENIED, record_denial
+
 
 class AppError(Exception):
     """Базовая ошибка домена: код + человекочитаемое сообщение + HTTP-статус."""
@@ -59,9 +61,25 @@ def _error_body(
     return body
 
 
+DENIAL_ERRORS = (TokenInvalidError, TokenExpiredError, ForbiddenError)
+
+
 def setup_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        if isinstance(exc, DENIAL_ERRORS):
+            # аудит отказа: best-effort, сбой записи не влияет на ответ
+            db = getattr(request.app.state, "db", None)
+            if db is not None:
+                await record_denial(
+                    db.session_factory,
+                    action=ACTION_ACCESS_DENIED,
+                    detail={
+                        "code": exc.code,
+                        "method": request.method,
+                        "path": request.url.path,
+                    },
+                )
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(exc.code, exc.message),

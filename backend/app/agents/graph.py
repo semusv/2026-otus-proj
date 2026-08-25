@@ -13,6 +13,7 @@ Tools Interface (rag/tools.py).
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypedDict
 
@@ -24,6 +25,7 @@ from app.agents.guardrails import (
     check_injection_heuristics,
     classify_injection_llm,
     classify_output_llm,
+    enforce_acl_boundary,
     extract_citations,
     refusal_answer,
     sanitize_query,
@@ -44,6 +46,8 @@ GENERATION_SYSTEM = (
     "на источник в формате [S1], [S2]. Если информации в источниках недостаточно - "
     "прямо скажи об этом. Отвечай по-русски, кратко и по делу."
 )
+
+logger = logging.getLogger("app.agents.graph")
 
 EVALUATE_SYSTEM = (
     "Ты - контролёр качества RAG-ответа. Оцени, достаточно ли найденного контекста "
@@ -357,7 +361,28 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
         await _emit("guardrails_out")
         notes = list(state.get("notes", []))
         answer = state.get("answer", "")
-        checked = extract_citations(answer, state.get("sources", []))
+
+        # финальный ACL-инвариант (этап 6): ни один источник/сосед вне допустимых
+        # меток не покидает границу API - независимо от поведения retrieval
+        acl = enforce_acl_boundary(
+            state.get("sources", []),
+            state.get("expansion_related_acts", []),
+            state.get("clearances", []),
+        )
+        status = state.get("status", "ok")
+        if acl.violated:
+            notes.append(f"acl_violation_dropped:{','.join(acl.dropped_ids)}"[:160])
+            status = "degraded"
+            audit_acl = runtime.extra.get("audit_acl_violation")
+            if audit_acl is not None:
+                try:
+                    await audit_acl(
+                        {"session_id": state.get("session_id"), "dropped_ids": acl.dropped_ids}
+                    )
+                except Exception:  # аудит best-effort: сбой записи не влияет на ответ
+                    logger.warning("Не удалось записать acl_violation в аудит", exc_info=True)
+
+        checked = extract_citations(answer, acl.sources)
 
         status = state.get("status", "ok")
         if checked.dropped_citations:
@@ -385,6 +410,7 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
         return {
             "answer": checked.clean_answer,
             "citations": checked.citations,
+            "expansion_related_acts": acl.related_acts,
             "status": status,
             "notes": notes,
         }

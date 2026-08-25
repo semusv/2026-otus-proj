@@ -197,11 +197,13 @@ class GraphRetriever:
                 """
                 MATCH (a:Act)-[:MENTIONS|HAS_TOPIC]->(t)
                 WHERE a.id IN $act_ids
+                  AND a.clearance IN $allowed
                 RETURN labels(t)[0] AS kind, t.name AS name, count(*) AS cnt
                 ORDER BY cnt DESC
                 LIMIT $limit
                 """,
                 act_ids=seed_act_ids + [row["id"] for row in act_rows],
+                allowed=clearances,
                 limit=self._max_terms,
             )
             term_rows: list[dict[str, Any]] = await term_result.data()
