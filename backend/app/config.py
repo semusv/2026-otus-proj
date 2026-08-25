@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     tracing_enabled: bool = True
     otel_exporter_endpoint: str = "http://otel-collector:4318/v1/traces"
 
+    # --- Langfuse (этап 7, ADR-008): опционально, graceful при недоступности ---
+    langfuse_enabled: bool = False
+    langfuse_url: str = ""
+    langfuse_public_key: str = ""
+    langfuse_secret_key: SecretStr = SecretStr("")
+
     # --- Ingestion ---
     ingest_corpus_dir: Path = Path("../corpus_test")
     ingest_extract_concepts: bool = False

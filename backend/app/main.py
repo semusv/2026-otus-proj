@@ -14,6 +14,7 @@ from app.core.errors import setup_error_handlers
 from app.core.logging import configure_logging
 from app.db.base import Database
 from app.middleware.correlation import CorrelationIdMiddleware
+from app.observability.langfuse_client import setup_langfuse, shutdown_langfuse
 from app.observability.tracing import instrument_libraries, setup_tracing
 from app.rag.retrievers import GraphRetriever
 
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     qdrant: AsyncQdrantClient | None = getattr(app.state, "qdrant_client", None)
     if qdrant is not None:
         await qdrant.close()
+    shutdown_langfuse()  # этап 7: флаш событий Langfuse (best-effort)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -42,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     cfg = settings or Settings()
     configure_logging(cfg.log_level)
     setup_tracing(enabled=cfg.tracing_enabled, endpoint=cfg.otel_exporter_endpoint)
+    setup_langfuse(cfg)  # этап 7: no-op при disabled/пустых ключах
 
     app = FastAPI(
         title=cfg.api_title,

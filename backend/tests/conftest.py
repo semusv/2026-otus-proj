@@ -25,6 +25,8 @@ def settings_factory() -> Callable[..., Settings]:
             "llm_model": "test-model",
             # юнит-контур не должен создавать OTLP-экспортёров (шум/сеть)
             "tracing_enabled": False,
+            # и Langfuse-клиентов (в infra/.env может быть включён)
+            "langfuse_enabled": False,
         }
         base.update(overrides)
         return Settings(_env_file=None, **base)  # type: ignore[arg-type]
