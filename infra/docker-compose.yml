@@ -26,13 +26,25 @@ services:
       context: ../backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    image: graphrag/backend:stage2
+    image: graphrag/backend:stage3
     container_name: graphrag-backend
     restart: unless-stopped
     environment:
-      APP_ENV: dev
+      APP_ENV: ${APP_ENV:-dev}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?APP_JWT_SECRET is required}
+      APP_JWT_TTL_MINUTES: ${APP_JWT_TTL_MINUTES:-30}
+      APP_PG_HOST: postgres
+      APP_PG_PORT: "5432"
+      APP_PG_USER: ${APP_PG_USER:?APP_PG_USER is required}
+      APP_PG_PASSWORD: ${APP_PG_PASSWORD:?APP_PG_PASSWORD is required}
+      APP_PG_DB: ${APP_PG_DB:?APP_PG_DB is required}
     ports:
       - "127.0.0.1:${APP_BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"]
     networks:
       - edge
       - data
@@ -47,7 +59,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
   postgres:
     image: ${APP_DOCKER_REGISTRY:-}postgres:16-alpine
