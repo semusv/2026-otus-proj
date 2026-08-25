@@ -57,7 +57,9 @@ class TestAdminIngestApi:
     async def test_status_requires_admin(self, itg_client: AsyncIterator[tuple[Any, Any]]) -> None:
         client, _ = itg_client
         token = await _login(client, "viewer")
-        resp = await client.get("/admin/ingest/status", headers={"Authorization": f"Bearer {token}"})
+        resp = await client.get(
+            "/admin/ingest/status", headers={"Authorization": f"Bearer {token}"}
+        )
         assert resp.status_code == 403
 
     async def test_start_and_status_roundtrip(
