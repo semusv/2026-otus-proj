@@ -75,6 +75,9 @@ class StubEmbedder:
         return vectors
 
 
+TEST_ACT_IDS = ("102010098", "102010238", "999000001")
+
+
 @pytest.fixture
 async def qdrant(itg_settings: Settings) -> AsyncIterator[QdrantWriter]:
     client = AsyncQdrantClient(url=itg_settings.qdrant_url, timeout=30)
@@ -86,21 +89,46 @@ async def qdrant(itg_settings: Settings) -> AsyncIterator[QdrantWriter]:
 
 @pytest.fixture
 async def neo4j(itg_settings: Settings) -> AsyncIterator[Neo4jWriter]:
+    """НЕ-деструктивная фикстура: чистит только тестовые акты, чужие данные не трогает."""
     writer = Neo4jWriter(
         itg_settings.neo4j_uri,
         itg_settings.neo4j_user,
         itg_settings.neo4j_password.get_secret_value(),
     )
+    await _purge_test_acts(writer)
     try:
         yield writer
     finally:
-        await writer.clear_all()
+        await _purge_test_acts(writer)
         await writer.close()
 
 
-async def _edge_count(neo4j: Neo4jWriter, rel: str) -> int:
-    async with neo4j._driver.session() as session:  # тестовый хелпер
-        result = await session.run(f"MATCH ()-[r:{rel}]->() RETURN count(r) AS cnt")
+async def _purge_test_acts(writer: Neo4jWriter) -> None:
+    async with writer._driver.session() as session:
+        await session.run(
+            "MATCH (a:Act) WHERE a.id IN $ids DETACH DELETE a",
+            ids=list(TEST_ACT_IDS),
+        )
+
+
+async def _edge_count(neo4j: Neo4jWriter, rel: str, *, scoped: bool = False) -> int:
+    query = (
+        f"MATCH (a:Act)-[r:{rel}]->() WHERE a.id IN $ids RETURN count(r) AS cnt"
+        if scoped
+        else f"MATCH ()-[r:{rel}]->() RETURN count(r) AS cnt"
+    )
+    async with neo4j._driver.session() as session:
+        result = await session.run(query, ids=list(TEST_ACT_IDS))
+        rows = await result.data()
+    return int(rows[0]["cnt"])
+
+
+async def _act_count(neo4j: Neo4jWriter) -> int:
+    async with neo4j._driver.session() as session:
+        result = await session.run(
+            "MATCH (a:Act) WHERE a.id IN $ids RETURN count(a) AS cnt",
+            ids=list(TEST_ACT_IDS),
+        )
         rows = await result.data()
     return int(rows[0]["cnt"])
 
@@ -117,36 +145,37 @@ class TestIngestionPipeline:
         assert stats.chunks_written > 0
 
         # Qdrant: точки с полным payload
-        total_points = sum(
-            [
-                await qdrant.count_act_points(act_id)
-                for act_id in ("102010098", "102010238", "999000001")
-            ]
-        )
+        total_points = sum([await qdrant.count_act_points(act_id) for act_id in TEST_ACT_IDS])
         assert total_points == stats.chunks_written
 
-        # Neo4j: узлы всех типов + рёбра
-        labels = await neo4j.counts_by_label()
-        assert labels["Act"] == 3
-        assert labels["Authority"] >= 1
-        assert labels["Topic"] >= 1
+        # Neo4j: узлы тестовых актов + рёбра (проверки скоупятся нашими id -
+        # граф может содержать данные приёмочного прогона, их не трогаем)
+        assert await _act_count(neo4j) == 3
+        assert await _edge_count(neo4j, "ISSUED_BY", scoped=True) >= 2
 
-        # REFERENCES: только цель, существующая в корпусе
-        assert await _edge_count(neo4j, "REFERENCES") == 1
-        assert await _edge_count(neo4j, "ISSUED_BY") >= 2
+        # REFERENCES: ребро ровно на акт, существующий в корпусе
+        async with neo4j._driver.session() as session:
+            rows = await (
+                await session.run(
+                    "MATCH (:Act {id: '999000001'})-[:REFERENCES]->(b:Act) "
+                    "RETURN collect(b.id) AS targets"
+                )
+            ).data()
+        assert rows[0]["targets"] == ["102010098"]
 
     async def test_rerun_is_idempotent(
         self, itg_settings: Settings, corpus_dir: Path, qdrant: QdrantWriter, neo4j: Neo4jWriter
     ) -> None:
         first = await run_ingestion(itg_settings, corpus_dir, embedder=StubEmbedder())
-        labels_after_first = await neo4j.counts_by_label()
-        refs_first = await _edge_count(neo4j, "REFERENCES")
+        refs_after_first = await _edge_count(neo4j, "REFERENCES", scoped=True)
+        acts_after_first = await _act_count(neo4j)
 
         second = await run_ingestion(itg_settings, corpus_dir, embedder=StubEmbedder())
 
         assert second.chunks_written == first.chunks_written, "нет дублей точек Qdrant"
-        assert await neo4j.counts_by_label() == labels_after_first, "узлы графа не задвоились"
-        assert await _edge_count(neo4j, "REFERENCES") == refs_first, "рёбра не задвоились"
+        assert await _act_count(neo4j) == acts_after_first, "узлы графа не задвоились"
+        refs_scoped = await _edge_count(neo4j, "REFERENCES", scoped=True)
+        assert refs_scoped == refs_after_first, "рёбра не задвоились"
 
     async def test_clearance_assigned_deterministically(
         self, itg_settings: Settings, corpus_dir: Path, qdrant: QdrantWriter, neo4j: Neo4jWriter
@@ -155,10 +184,5 @@ class TestIngestionPipeline:
         # повторный прогон даёт тот же clearance на тех же актах - проверка через
         # стабильность числа точек при фильтре по конкретной метке
         await run_ingestion(itg_settings, corpus_dir, embedder=StubEmbedder())
-        total = sum(
-            [
-                await qdrant.count_act_points(act_id)
-                for act_id in ("102010098", "102010238", "999000001")
-            ]
-        )
+        total = sum([await qdrant.count_act_points(act_id) for act_id in TEST_ACT_IDS])
         assert total > 0
