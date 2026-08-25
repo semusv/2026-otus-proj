@@ -36,6 +36,18 @@ class TokenExpiredError(AppError):
     message = "Срок действия токена истёк"
 
 
+class ForbiddenError(AppError):
+    code = "forbidden"
+    status_code = 403
+    message = "Недостаточно прав для операции"
+
+
+class IngestAlreadyRunningError(AppError):
+    code = "ingest_already_running"
+    status_code = 409
+    message = "Прогон ingestion уже выполняется"
+
+
 def _error_body(
     code: str,
     message: str,

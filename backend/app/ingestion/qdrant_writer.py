@@ -72,6 +72,22 @@ class QdrantWriter:
         await self._client.upsert(collection_name=self._collection, points=points, wait=True)
         return len(points)
 
+    async def delete_act(self, act_id: str) -> None:
+        """Удаляет все точки акта (чистый ре-ingest при изменившемся чанкинге)."""
+        await self._client.delete(
+            collection_name=self._collection,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="act_id", match=models.MatchValue(value=act_id)
+                        )
+                    ]
+                )
+            ),
+            wait=True,
+        )
+
     async def count_act_points(self, act_id: str) -> int:
         """Число точек акта (для тестов идемпотентности и статуса прогона)."""
         result = await self._client.count(

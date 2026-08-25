@@ -42,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_tags=[
             {"name": "system", "description": "Здоровье сервиса и метрики"},
             {"name": "auth", "description": "Аутентификация и профиль пользователя"},
+            {"name": "admin", "description": "Управление ingestion корпуса (роль admin)"},
         ],
         lifespan=lifespan,
     )
