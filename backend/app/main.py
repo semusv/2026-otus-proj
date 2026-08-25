@@ -10,6 +10,7 @@ from app.api import api_router
 from app.config import Settings
 from app.core.errors import setup_error_handlers
 from app.core.logging import configure_logging
+from app.db.base import Database
 from app.middleware.correlation import CorrelationIdMiddleware
 
 
@@ -21,6 +22,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings.api_version,
     )
     yield
+    db: Database | None = getattr(app.state, "db", None)
+    if db is not None:
+        await db.dispose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -45,8 +49,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     setup_error_handlers(app)
     app.add_middleware(CorrelationIdMiddleware)
+
+    app.state.db = Database(cfg)
+
     app.include_router(api_router)
     return app
-
-
-app = create_app()
