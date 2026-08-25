@@ -399,7 +399,7 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 - VectorChunk использует поле `act_title` (не `title`) — сигнатура dataclass'а,
   ошибка проявляется только в runtime сидирования тестов.
 
-### [ ] Этап 7. Observability (полные три столпа)
+### [x] Этап 7. Observability (полные три столпа)
 **Deliverables:**
 - **Трейсы:** OTel SDK + instrumentation (httpx, SQLAlchemy) + ручные спаны на каждом узле LangGraph; экспорт в Jaeger через otel-collector; корреляция `X-Trace-Id`/`traceparent` от фронта через Traefik → backend → все внешние вызовы; Langfuse получает трейсы промптов через langfuse-python SDK (URL из `.env`, отключаемо).
 - **Метрики:** Prometheus-эндпоинт backend: RPS, latency-гистограммы per endpoint и per узел графа, счётчики ошибок/статусов (`degraded`/`empty`), размер контекста; дашборд Grafana (json в `infra/grafana/`): latency, RPS, tokens/sec с vLLM.
@@ -449,20 +449,47 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 - [x] Grafana: provisioning dashboards-провайдера + json-дашборд (RPS, latency p50/p95, статусы чата, guardrails, узлы графа, итерации агента, размер контекста, vLLM)
 
 **C. Backend — трейсы и логи**
-- [ ] deps: opentelemetry-instrumentation-httpx/sqlalchemy, langfuse, pytest-timeout; config: APP_LANGFUSE_URL/PUBLIC_KEY/SECRET_KEY/ENABLED
-- [ ] единый trace_id: server-span в CorrelationIdMiddleware (W3C extract | X-Trace-Id→SpanContext), httpx+SQLAlchemy instrumentation; traced_node узлов графа сохранён
-- [ ] user_id в JSON-логах (contextvar + auth-deps); guardrails→audit_log (blocked/sanitized/injection), best-effort
+- [x] deps: opentelemetry-instrumentation-httpx/sqlalchemy, langfuse, prometheus-client, pytest-timeout; config: APP_LANGFUSE_URL/PUBLIC_KEY/SECRET_KEY/ENABLED
+- [x] единый trace_id: server-span в CorrelationIdMiddleware (W3C extract | X-Trace-Id→SpanContext), httpx+SQLAlchemy instrumentation; traced_node узлов графа сохранён
+- [x] user_id в JSON-логах (contextvar + auth-deps); guardrails→audit_log (input/refuse/output), best-effort
 
 **D. Backend — метрики и Langfuse**
-- [ ] metrics-middleware (route template) + бизнес-метрики чата/графа/guardrails; реальный `/metrics` (prometheus_client), исключения /health,/metrics
-- [ ] Langfuse-обвязка: init в lifespan, генерации в llm/client, flush best-effort, disabled-ветка
+- [x] metrics-middleware (route template) + бизнес-метрики чата/графа/guardrails; реальный `/metrics` (prometheus_client, v0.6.0 API), исключения /health,/metrics
+- [x] Langfuse-обвязка: init в create_app, generation на llm.complete/stream через `start_as_current_observation` + `propagate_attributes(session_id=X-Trace-Id)`, flush на shutdown, disabled-ветка
 
 **E. Тесты и приёмка**
-- [ ] unit: SpanContext от X-Trace-Id (валидное/произвольное/отсутствие), JSON-логи содержат trace_id/user_id, `/metrics` отдаёт счётчики, Langfuse-disabled путь
-- [ ] integration против compose: после запроса трейс есть в Jaeger API и найден по X-Trace-Id; `/metrics` обновился; чат работает при выключенном/недоступном Langfuse
-- [ ] Postman: `/metrics` + проверка эха X-Trace-Id/X-Request-Id; полный newman зелёный против пересобранного образа `graphrag/backend:stage7`
-- [ ] Acceptance зафиксирован: полный трейс в Jaeger (узлы графа + внешние вызовы) ✓; переданный X-Trace-Id == trace id трейса и эхо в ответе ✓; Grafana живые метрики ✓; логи содержат тот же trace_id ✓
-- [ ] make lint + pytest зелёные; коммиты подшагами `stage-7(...)`: docs → infra → tracing → logs → metrics → langfuse → tests; тег `stage/7`
+- [x] unit 103: SpanContext от X-Trace-Id (валидный/произвольный/traceparent/отсутствие), JSON-логи c user_id, `/metrics` семейства+route-series, Langfuse-disabled путь
+- [x] integration 36: трейс найден в Jaeger API ПО X-Trace-Id через Traefik (E2E); `/metrics` route-series обновился; JSON-лог == эхо заголовков; чат работает при выключенном Langfuse
+- [x] Postman: папка observability (`/metrics` семейства без self-scrape, эхо X-Trace-Id/X-Request-Id); полный newman **23 запроса / 59 assertions / 0 fail** против пересобранного образа `graphrag/backend:stage7`
+- [x] Acceptance зафиксирован: Jaeger показывает полный трейс (узлы графа + внешние вызовы) ✓; переданный X-Trace-Id == trace id трейса и эхо в ответе ✓; Grafana: дашборд provisioned, живые метрики ✓; логи содержат тот же trace_id ✓; Langfuse получил 99 llm.complete + 41 llm.stream за прогон ✓
+- [x] make lint + pytest зелёные; коммиты подшагами `stage-7(...)`: docs → infra → tracing → logs → metrics → langfuse → tests → resilience; тег `stage/7`
+
+Уроки этапа (учесть далее):
+- **langfuse-python v4**: метода `.trace()` больше нет - только `start_as_current_observation(as_type="generation")`;
+  session_id/user_id задаются через `propagate_attributes(...)` ДО создания наблюдения
+  (docs/observability/features/sessions). SDK добавляет свой span-процессор к СУЩЕСТВУЮЩЕМУ
+  глобальному TracerProvider - Jaeger не ломается; дефолтный should_export_span пропускает
+  только LF/gen_ai-спаны, шум /metrics в Langfuse не течёт;
+- **LM Studio плавающий сбой** "Error rendering prompt with jinja: No user query found" -
+  лечится ОДНИМ ретраем APIError в LLMClient + деградацией generate_node
+  (status=degraded, note generate_llm_error) вместо HTTP 500;
+- **Traefik v3 молча фильтрует unhealthy/starting контейнеры** - роутер появляется только после
+  green healthcheck (диагностика через log level DEBUG, строка "Filtering unhealthy");
+  Next.js (langfuse web/worker) слушает на $HOSTNAME: при двух сетях контейнера это внутренний
+  IP => HOSTNAME=0.0.0.0 в env; worker health = /api/health:3030 (не /api/public/health);
+- **Langfuse compose**: актуальному образу нужен S3-env (MinIO) и ЯВНЫЕ LANGFUSE_INIT_ORG_ID/
+  PROJECT_ID/USER_ID - без них автоинициализация ключей молча игнорируется; бакет создаёт
+  init-джоба minio/mc;
+- **Grafana 12**: поле uid в provisioning datasources.yml вызывает фатальный
+  "data source not found"; маунт дашбордов НЕ вкладывать в /var/lib/grafana (конфликт с volume);
+  панели ссылаются на datasource по имени;
+- **alembic fileConfig глушит логгеры приложения** (disable_existing_loggers по умолчанию True):
+  все app.*-логгеры, созданные до миграций, молчат до конца процесса - фикс в migrations/env.py;
+  следствие для тестов: caplog бесполезен после create_app (configure_logging делает
+  root.handlers.clear()) - хендлер вешать на исходный логгер;
+- **Docker Desktop/ресурсы**: тяжёлый docker build с полным выводом через PS-пайплайн выел память
+  (лог билда - в файл); два стека Langfuse одновременно не держать (старый остановлен, данные в volumes);
+  httpcore резолвит *.localhost в ::1 при портах на 127.0.0.1 - в тестах ходить по IP с Host-заголовком.
 
 ### [ ] Этап 8. Фронтенд React SPA (минимальный)
 **Deliverables:** Vite + React + TS, без Redux/UI-китов — хуки + чистый CSS (тёмная тема). Экраны: Login (JWT), Chat (SSE-стриминг, цитаты, путь по графа «чипами»), Admin (кнопка ingestion + статус). nginx-контейнер за Traefik на `/`.
