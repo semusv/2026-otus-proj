@@ -497,6 +497,57 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 **Acceptance:** полный сценарий демо проходит в браузере: логин → вопрос → стриминг ответа → цитаты → путь графа; viewer не видит секретные источники; типы фронта соответствуют актуальному контракту.
 **Тесты:** typecheck + eslint чистые; опционально vitest smoke на компоненты. Демо-сценарий фиксируется текстом.
 
+Решения этапа (зафиксировано при планировании):
+- **API-доступ — same-origin через nginx-прокси**: CORS в бэкенде нет и не добавляем; nginx отдаёт
+  статику SPA и проксирует `/api`, `/auth`, `/admin`, `/health` на `backend:8000` по внутренней сети
+  (для SSE — `proxy_buffering off`, read_timeout 300s). Бэкенд и контракт не меняются;
+- Traefik: SPA на Host(`localhost`) (свободен; api./grafana./langfuse.* не тронуты);
+- JWT — sessionStorage (+ expires_in из TokenResponse), очистка при logout и 401;
+- Типы: `openapi-typescript docs/api/openapi.yaml` → `src/lib/api-types.ts`, файл коммитится,
+  регенерация `make openapi-types` при изменении контракта. SSE-payload'ы (`status/token/done/error`)
+  в yaml НЕ схематизированы (эндпоинт объявлен как object) — типы событий пишутся вручную в
+  `src/lib/sse.ts` по текстовому описанию контракта; структура `done` == ChatResponse бэкенда;
+- Стадии конвейера для «чипов» — фактические события статуса графа:
+  guardrails → planner(iteration, tools) → retrieve(tools) → fusion_rerank → generate → evaluate → guardrails_out;
+- Тема — тёмно-синяя («midnight navy»), чистый CSS с переменными, без UI-китов и внешних CDN-шрифтов (закрытый контур);
+- Тесты фронта: typecheck + eslint gate; vitest smoke — парсер SSE-фреймов (частичные чанки) и
+  маппинг ошибок API; лимит testTimeout 5s/тест;
+- Демо-сценарий фиксируется текстом в `frontend/README.md`.
+
+Чек-лист выполнения:
+
+**A. Документация**
+- [ ] решения + чек-лист этапа 8 в PLAN.md
+
+**B. Каркас frontend/**
+- [ ] Vite + React + TS (strict), eslint 9 flat + typescript-eslint; без Redux/UI-китов/роутера
+- [ ] тёмно-синяя тема (CSS-переменные), index.html c инлайн SVG-favicon
+
+**C. Контрактный слой**
+- [ ] `src/lib/api-types.ts` сгенерирован из docs/api/openapi.yaml и закоммичен
+- [ ] fetch-обёртка: Bearer из sessionStorage, X-Trace-Id (32-hex), разбор ErrorResponse/HTTPValidationError
+- [ ] SSE-парсер ReadableStream (`event:`/`data:`, частичные чанки) + типы событий; AbortController
+- [ ] vitest smoke: парсер фреймов, маппинг ошибок — зелёные
+
+**D. Экраны**
+- [ ] Login: форма → /auth/login → sessionStorage → /auth/me (бейдж роли/clearances)
+- [ ] Chat: стриминг токенов; чипы стадий конвейера; цитаты [S#] с clearance-бейджами; путь по графу;
+       статус ok/degraded/empty, notes, trace_id; session_id переиспользуется между ходами
+- [ ] Admin (только admin): кнопка ingestion (202/409), поллинг статуса, stats/error/state
+- [ ] Logout, обработка 401 (разлогин)
+
+**E. Инфраструктура**
+- [ ] frontend/Dockerfile (node build → nginx), nginx.conf (gzip, SPA-fallback, SSE-прокси)
+- [ ] сервис frontend в infra/docker-compose.yml: graphrag/frontend:stage8, сеть edge, Traefik Host(`localhost`)
+- [ ] Makefile: frontend-install/lint/test/build, openapi-types
+
+**F. Приёмка**
+- [ ] typecheck + eslint + vitest зелёные; production build успешен
+- [ ] E2E в браузере через Traefik: логин analyst → вопрос → стриминг → цитаты → путь графа ✓
+- [ ] viewer × SECRET: секретных источников нет ни в ответе, ни в цитатах ✓
+- [ ] демо-сценарий зафиксирован текстом (frontend/README.md)
+- [ ] коммиты подшагами stage-8(...) + тег stage/8
+
 ### [ ] Этап 9. E2E Postman + нагрузочный отчёт
 **Deliverables:** полная коллекция Postman (`tests/postman/`: env local, сценарии auth → ingest status → chat RBAC → health/metrics), прогон через Newman CLI `scripts/run_postman.(ps1|sh)`. Нагрузочный тест (locust или k6) на `/api/chat` (non-stream) и `/health` → `docs/load-report.md` (RPS, p50/p95, токены/сек на RTX 5070 Ti).
 **Acceptance:** `make test-postman` зелёный; отчёт с цифрами готов.
