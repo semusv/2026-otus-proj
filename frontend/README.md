@@ -1,0 +1,94 @@
+# GraphRAG Frontend (этап 8)
+
+Минимальный SPA: **Vite + React 19 + TypeScript** без Redux/UI-китов и роутера.
+Тёмно-синяя тема на чистом CSS (переменные в `src/styles/theme.css`), без внешних CDN (закрытый контур).
+
+## Экраны
+
+| Экран | Доступ | Что делает |
+|---|---|---|
+| **Login** | все | `POST /auth/login` → JWT в `sessionStorage`, профиль `/auth/me` (роль + метки доступа) |
+| **Chat** | все | SSE-стриминг `POST /api/chat`: токены, чипы стадий конвейера, цитаты `[S#]` с clearance-бейджами, путь по графу, trace_id/replans/notes |
+| **Admin** | только `admin` | Кнопка запуска ingestion + поллинг статуса (202/409, stats/error/state) |
+
+## Запуск
+
+### Продакшн-путь (docker-compose)
+
+```bash
+cd infra && docker compose up -d --build frontend
+```
+
+SPA доступен через Traefik: **http://localhost/** (nginx same-origin проксирует
+`/api`, `/auth`, `/admin`, `/health` на `backend:8000`; для SSE отключена буферизация).
+CORS в бэкенде не используется — браузер ходит только на `localhost`.
+
+### Дев-режим (vite dev server)
+
+```bash
+cd frontend && npm ci && npm run dev
+```
+
+Прокси dev-сервера идёт на `http://127.0.0.1:8000` (переопределяется `VITE_DEV_PROXY_TARGET`
+в `frontend/.env.local`). Бэкенд при этом доступен напрямую, минуя Traefik.
+
+### Тесты и качество
+
+```bash
+make frontend-lint     # eslint + tsc --noEmit (gate)
+make frontend-test     # vitest smoke: парсер SSE-фреймов, маппинг ошибок API (testTimeout 5s)
+make frontend-build    # production build
+make openapi-types     # регенерация src/lib/api-types.ts из docs/api/openapi.yaml
+```
+
+Типы API генерируются из коммиченного контракта `docs/api/openapi.yaml` (`openapi-typescript`)
+и коммитятся. Контракт изменился → `make openapi-types` → коммит. SSE-payload'ы
+(`status/token/done/error`) типизированы вручную в `src/lib/sse.ts` по описанию контракта
+(в yaml эндпоинт объявлен как object); структура `done` == ChatResponse бэкенда.
+
+## Демо-сценарий (acceptance этапа 8)
+
+Стек поднят: `infra/.env` заполнен, сид-пользователи созданы (`make seed-users`),
+корpus про-ingested. Открыть **http://localhost/**
+
+1. **Логин analyst** (`analyst` / `analyst123`) → хедер показывает роль и метки `[PUBLIC, INTERNAL]`.
+2. **Вопрос**: «Какие требования к раскрытию информации эмитентами?»
+   - под сообщением загораются чипы стадий: Guardrails → Planner (tools) → Retrieval → Fusion+Rerank → Generate → Evaluate → Citations check;
+   - при re-plan на Planner появляется бейдж `re-plan ×N`;
+   - текст стримится с мигающим курсором;
+   - после финала: карточки источников `[S#] Название · чанк N` с бейджами clearance,
+     цепочка «Путь по графе» (чипы актов со стрелками), бейдж статуса ok/degraded/empty, `trace_id`.
+3. **Продолжение диалога** — второй уточняющий вопрос: агент помнит сессию (`session_id` переиспользуется).
+4. **RBAC**: повторить шаги 1–2 под **viewer** (`viewer` / `viewer123`) и задать вопрос про
+   INTERNAL/SECRET акт (например «Расскажи содержание акта 102010099 Гражданский кодекс РСФСР»):
+   в цитатах и пути графа отсутствуют непубличные источники, статус `degraded`/`empty`,
+   секретного текста нет нигде. Вкладка **Админ** у viewer/analyst не отображается, прямой
+   вызов `/admin/*` возвращает 403.
+5. **Admin** (`admin` / `admin123`) → вкладка Админ → кнопка «Запустить ingestion» →
+   статус `running` (поллинг каждые 2 c) → `done` со статистикой. Повторный клик во время
+   прогона → «Прогон уже выполняется» (409).
+
+## Структура
+
+```
+src/
+├── main.tsx              # entrypoint, стили темы
+├── App.tsx               # auth-состояние, экраны, хедер с ролью/clearances/logout
+├── pages/
+│   ├── LoginPage.tsx     # форма входа → JWT → /auth/me
+│   ├── ChatPage.tsx      # SSE-стриминг, сообщения, предложения вопросов
+│   └── AdminPage.tsx     # ingestion + поллинг статуса
+├── components/
+│   ├── PipelineChips.tsx # чипы стадий конвейера (re-plan/tools)
+│   └── Badges.tsx        # clearance/статус бейджи
+├── lib/
+│   ├── api-types.ts      # СГЕНЕРИРОВАНО из docs/api/openapi.yaml — не править руками
+│   ├── api.ts            # fetch-обёртка: Bearer, X-Trace-Id, ошибки по схемам контракта
+│   ├── sse.ts            # парсер SSE-фреймов + типы событий чата
+│   └── auth.ts           # JWT в sessionStorage (+expires_in), профиль
+└── styles/               # theme.css (переменные) + app/components.css
+```
+
+Безопасность: JWT живёт до закрытия вкладки (`sessionStorage`), автоматически очищается
+при logout и на любой ответ 401; `X-Trace-Id` (32-hex) генерируется на каждый запрос —
+сквозная трассировка фронт→Traefik→backend→Jaeger/Langfuse (этап 7).

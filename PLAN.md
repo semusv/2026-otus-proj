@@ -517,36 +517,45 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 Чек-лист выполнения:
 
 **A. Документация**
-- [ ] решения + чек-лист этапа 8 в PLAN.md
+- [x] решения + чек-лист этапа 8 в PLAN.md
 
 **B. Каркас frontend/**
-- [ ] Vite + React + TS (strict), eslint 9 flat + typescript-eslint; без Redux/UI-китов/роутера
-- [ ] тёмно-синяя тема (CSS-переменные), index.html c инлайн SVG-favicon
+- [x] Vite + React + TS (strict), eslint 9 flat + typescript-eslint; без Redux/UI-китов/роутера
+- [x] тёмно-синяя тема (CSS-переменные), index.html c инлайн SVG-favicon
 
 **C. Контрактный слой**
-- [ ] `src/lib/api-types.ts` сгенерирован из docs/api/openapi.yaml и закоммичен
-- [ ] fetch-обёртка: Bearer из sessionStorage, X-Trace-Id (32-hex), разбор ErrorResponse/HTTPValidationError
-- [ ] SSE-парсер ReadableStream (`event:`/`data:`, частичные чанки) + типы событий; AbortController
-- [ ] vitest smoke: парсер фреймов, маппинг ошибок — зелёные
+- [x] `src/lib/api-types.ts` сгенерирован из docs/api/openapi.yaml и закоммичен
+- [x] fetch-обёртка: Bearer из sessionStorage, X-Trace-Id (32-hex), разбор ErrorResponse/HTTPValidationError
+- [x] SSE-парсер ReadableStream (`event:`/`data:`, частичные чанки) + типы событий; AbortController
+- [x] vitest smoke: парсер фреймов, маппинг ошибок — зелёные (19)
 
 **D. Экраны**
-- [ ] Login: форма → /auth/login → sessionStorage → /auth/me (бейдж роли/clearances)
-- [ ] Chat: стриминг токенов; чипы стадий конвейера; цитаты [S#] с clearance-бейджами; путь по графу;
+- [x] Login: форма → /auth/login → sessionStorage → /auth/me (бейдж роли/clearances)
+- [x] Chat: стриминг токенов; чипы стадий конвейера; цитаты [S#] с clearance-бейджами; путь по графу;
        статус ok/degraded/empty, notes, trace_id; session_id переиспользуется между ходами
-- [ ] Admin (только admin): кнопка ingestion (202/409), поллинг статуса, stats/error/state
-- [ ] Logout, обработка 401 (разлогин)
+- [x] Admin (только admin): кнопка ingestion (202/409), поллинг статуса, stats/error/state
+- [x] Logout, обработка 401 (разлогин)
 
 **E. Инфраструктура**
-- [ ] frontend/Dockerfile (node build → nginx), nginx.conf (gzip, SPA-fallback, SSE-прокси)
-- [ ] сервис frontend в infra/docker-compose.yml: graphrag/frontend:stage8, сеть edge, Traefik Host(`localhost`)
-- [ ] Makefile: frontend-install/lint/test/build, openapi-types
+- [x] frontend/Dockerfile (node build → nginx), nginx.conf (gzip, SPA-fallback, SSE-прокси)
+- [x] сервис frontend в infra/docker-compose.yml: graphrag/frontend:stage8, сеть edge, Traefik Host(`localhost`)
+- [x] Makefile: frontend-install/lint/test/build, openapi-types
 
 **F. Приёмка**
-- [ ] typecheck + eslint + vitest зелёные; production build успешен
-- [ ] E2E в браузере через Traefik: логин analyst → вопрос → стриминг → цитаты → путь графа ✓
-- [ ] viewer × SECRET: секретных источников нет ни в ответе, ни в цитатах ✓
-- [ ] демо-сценарий зафиксирован текстом (frontend/README.md)
-- [ ] коммиты подшагами stage-8(...) + тег stage/8
+- [x] typecheck + eslint + vitest зелёные; production build успешен (207KB→66KB gzip);
+      backend gate не задет: ruff+mypy+unit 103 (попутно вычищен lint-хвост этапа 7 в test_observability)
+- [x] E2E через Traefik→nginx→backend (curl, продакшн-сборка): логин analyst → SSE-стриминг
+      (status/token/done) → цитата [S3] PUBLIC → путь графа с INTERNAL-актами → replans=2,
+      trace_id эхо; viewer/analyst на /admin/* → 403; api.localhost живой
+- [ ] прогон демо-сценария в браузере по README (финальная ручная приёмка) — после подтверждения тег stage/8
+
+Уроки этапа:
+- TypeScript 7 (нативный) пока несовместим с typescript-eslint (peer <6.1) — фронт пинится на ~5.9;
+- кириллический JSON из PowerShell/curl.exe ломается кодировкой консоли («JSON decode error»
+  на бэкенде) — тело запроса писать в UTF-8 файл и слать `--data-binary '@file'`;
+- loadEnv импортируется из 'vite', defineConfig c полем test — из 'vitest/config';
+- comment-only SSE-кадр (`: ping`) по спецификации не диспатчится — парсер отдаёт фрейм
+  только при наличии data-строк.
 
 ### [ ] Этап 9. E2E Postman + нагрузочный отчёт
 **Deliverables:** полная коллекция Postman (`tests/postman/`: env local, сценарии auth → ingest status → chat RBAC → health/metrics), прогон через Newman CLI `scripts/run_postman.(ps1|sh)`. Нагрузочный тест (locust или k6) на `/api/chat` (non-stream) и `/health` → `docs/load-report.md` (RPS, p50/p95, токены/сек на RTX 5070 Ti).
