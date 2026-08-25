@@ -188,6 +188,43 @@ CLI-команда + `POST /admin/ingest` (background task). Разметка ч
 **Acceptance:** после прогона в Neo4j Browser видны Act/Authority/Topic и связи; в Qdrant есть векторы с payload.
 **Тесты:** unit (парсер, чанкер, маппинг онтологии), integration (реальные Qdrant/Neo4j из compose: узлы и векторы существуют), идемпотентность повторного прогона (нет дублей). Postman: ingest + статус.
 
+Решения этапа (зафиксировано при планировании):
+- Clearance-разметка актов — **детерминированный hash от act_id**, проценты INTERNAL/SECRET настраиваются
+  конфигом (`APP_INGEST_*`, воспроизводимо между прогонами);
+- LLM-экстракция Concepts включается флагом `APP_INGEST_EXTRACT_CONCEPTS`; unit-тесты — на мок-LLM,
+  реальный LM Studio запускается только для интеграционного прогона/приёмки.
+
+Чек-лист выполнения:
+
+**A. Зависимости и конфиг**
+- [ ] deps: qdrant-client, neo4j (async), sentence-transformers + CPU-torch (bge-m3, ADR-009)
+- [ ] config: APP_QDRANT_URL, APP_NEO4J_URI/USER/PASSWORD, APP_EMBEDDING_MODEL, APP_CHUNK_MAX_CHARS, APP_INGEST_* (clearance %, extract_concepts); `.env.example` дополнен
+
+**B. Ядро ingestion (чистые функции)**
+- [ ] `ingestion/parser.py`: XML → `ParsedAct`; нормализация статусов; пустые keywords/classifier не падают
+- [ ] `ingestion/cleaner.py`: чистка артефактов разметки
+- [ ] `ingestion/chunker.py`: разбивка по «Статья N.», фолбэк — абзацы; max chars из конфига
+- [ ] clearance-резолвер: hash(act_id) → PUBLIC/INTERNAL/SECRET по процентам из конфига
+- [ ] маппинг онтологии: Act/Authority/Topic + ISSUED_BY/REFERENCES (только на акты корпуса)/HAS_TOPIC
+
+**C. Хранилища и модели**
+- [ ] `QdrantWriter`: коллекция `chunks` (dim 1024, cosine), payload-index clearance, batch upsert
+- [ ] `Neo4jWriter`: идемпотентные MERGE, constraints при init
+- [ ] embeddings: bge-m3 lazy-load CPU
+- [ ] `ConceptExtractor` (OpenAI-совместимый клиент, JSON-выдача, флаг APP_INGEST_EXTRACT_CONCEPTS)
+
+**D. Оркестрация и API**
+- [ ] pipeline-оркестратор (`ingestion/pipeline.py`) + CLI `python -m app.ingestion`
+- [ ] `POST /admin/ingest` (admin-only, background task) + `GET /admin/ingest/status`
+- [ ] экспорт `docs/api/openapi.yaml`
+
+**E. Приёмка этапа**
+- [ ] unit: парсер/чанкер/clearance/онтология на фикстурах corpus_test — зелёные
+- [ ] integration против compose: узлы и векторы существуют, идемпотентность повторного прогона
+- [ ] полный прогон corpus_test c LM Studio: граф в Neo4j Browser, Concepts извлечены, векторы+payload в Qdrant
+- [ ] Postman: ingest + статус
+- [ ] `make lint` + pytest зелёные; коммиты подшагами + тег `stage/4`
+
 ### [ ] Этап 5. Query pipeline (LangGraph)
 **Deliverables:** граф LangGraph (state machine, НЕ линейная цепочка):
 - Узлы: `guardrail_in → planner (выбор инструментов) → tools [retrieve_vec (Qdrant+ACL filter) | expand_graph (Neo4j Cypher 1–2 hop)] → fusion → rerank (bge-reranker CPU) → generate (vLLM stream) → evaluate → guardrail_out (проверка цитат)`
