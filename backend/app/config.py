@@ -29,11 +29,13 @@ def build_dsn(user: str, password: str, host: str, port: int, db: str) -> str:
 def load_env_file_into_environ(path: str = DEFAULT_ENV_FILE) -> None:
     """Доливает переменные из infra/.env в os.environ (setdefault: реальный env приоритетнее).
 
-    Нужно для запуска CLI-скриптов (seed, миграции) вне docker-compose.
-    В контейнере файла нет — операция no-op.
+    Нужно для запуска CLI-скриптов (seed, миграции, ingestion) вне docker-compose.
+    В контейнере файла нет - операция no-op. Пустые значения НЕ инжектируются:
+    для сторонних библиотек (например, HF_ENDPOINT="") пустая строка не эквивалентна
+    "не задано" и ломает дефолты (huggingface_hub собирает URL без протокола).
     """
     for key, value in dotenv_values(path).items():
-        if value is not None:
+        if value:  # None и "" пропускаем
             os.environ.setdefault(key, value)
 
 

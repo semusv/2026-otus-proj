@@ -20,7 +20,7 @@ from app.ingestion.chunker import chunk_act
 from app.ingestion.cleaner import clean_text
 from app.ingestion.clearance import resolve_clearance
 from app.ingestion.concepts import ConceptExtractor
-from app.ingestion.embeddings import Embedder
+from app.ingestion.embeddings import Embedder, EmbeddingBackend
 from app.ingestion.neo4j_writer import Neo4jWriter
 from app.ingestion.ontology import filter_references, topics_of
 from app.ingestion.parser import ParsedAct, parse_act
@@ -47,7 +47,7 @@ async def run_ingestion(
     corpus_dir: Path,
     *,
     extract_concepts: bool | None = None,
-    embedder: Embedder | None = None,
+    embedder: EmbeddingBackend | None = None,
 ) -> IngestStats:
     """Полный прогон ingestion по каталогу XML-файлов.
 

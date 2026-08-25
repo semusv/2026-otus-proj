@@ -4,7 +4,16 @@
 приложение стартует быстро, а тяжёлая загрузка нужна только ingestion-пайплайну.
 """
 
-from typing import Any
+from typing import Any, Protocol
+
+
+class EmbeddingBackend(Protocol):
+    """Контракт эмбеддера: точка подмены стабом в тестах."""
+
+    @property
+    def dim(self) -> int: ...
+
+    def encode(self, texts: list[str]) -> list[list[float]]: ...
 
 
 class Embedder:

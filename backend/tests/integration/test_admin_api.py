@@ -1,6 +1,5 @@
-"""Интеграционные тесты admin/ingest API (pipeline мокается - без LLM/БД нагрузки)."""
+﻿"""Интеграционные тесты admin/ingest API (pipeline мокается - без LLM/БД нагрузки)."""
 
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +45,7 @@ async def _login(client: Any, username: str) -> str:
 
 class TestAdminIngestApi:
     async def test_start_requires_admin(
-        self, itg_client: AsyncIterator[tuple[Any, Any]]
+        self, itg_client: tuple[Any, Any]
     ) -> None:
         client, _ = itg_client
         token = await _login(client, "viewer")
@@ -54,7 +53,7 @@ class TestAdminIngestApi:
         assert resp.status_code == 403
         assert resp.json()["code"] == "forbidden"
 
-    async def test_status_requires_admin(self, itg_client: AsyncIterator[tuple[Any, Any]]) -> None:
+    async def test_status_requires_admin(self, itg_client: tuple[Any, Any]) -> None:
         client, _ = itg_client
         token = await _login(client, "viewer")
         resp = await client.get(
@@ -63,7 +62,7 @@ class TestAdminIngestApi:
         assert resp.status_code == 403
 
     async def test_start_and_status_roundtrip(
-        self, itg_client: AsyncIterator[tuple[Any, Any]]
+        self, itg_client: tuple[Any, Any]
     ) -> None:
         client, _ = itg_client
         token = await _login(client, "admin")
@@ -83,7 +82,7 @@ class TestAdminIngestApi:
             assert body["stats"]["chunks_written"] == 42
 
     async def test_second_start_conflict_or_accepted(
-        self, itg_client: AsyncIterator[tuple[Any, Any]]
+        self, itg_client: tuple[Any, Any]
     ) -> None:
         client, _ = itg_client
         token = await _login(client, "admin")
