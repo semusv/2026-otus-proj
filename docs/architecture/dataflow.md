@@ -84,8 +84,8 @@ flowchart LR
     OC --> J[(Jaeger)]
     OC --> P[(Prometheus)]
     P --> G[Grafana dashboards]
-    BE -->|JSON logs + trace_id| L[stdout / audit_log PG]
-    BE -.-> LF[Langfuse внешний]
+    BE -->|JSON logs + trace_id/user_id| L[stdout / audit_log PG]
+    BE -.->|langfuse SDK, session = X-Trace-Id, отключаемо| LF[Langfuse self-hosted compose]
 ```
 
 Правило разбора инцидента: `X-Trace-Id` из ответа API → спаны в Jaeger → логи с этим trace_id.

@@ -9,7 +9,7 @@
 - **Тема реализации:** Advanced RAG → **GraphRAG (Knowledge Graphs)**. Простой векторный поиск не принимается.
 - **Датасет:** RusLawOD v3 (XML правовых актов РФ, 1991–2025): https://github.com/irlcode/RusLawOD. Тестовый корпус — `corpus_test/` (100 файлов).
 - **Референс структуры backend:** https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template (пишем с нуля, оглядываясь на структуру).
-- **Стек:** Python 3.11+ / FastAPI · LangGraph · LLM Serving: dev — LM Studio (OpenAI-compatible, `APP_LLM_BASE_URL`), целевой — vLLM Qwen3-8B-AWQ (ADR-001, дополнение) · Qdrant · Neo4j Community · PostgreSQL 16 · Traefik · OTel→Jaeger/Prometheus/Grafana · Langfuse (внешний docker-инстанс) · React SPA.
+- **Стек:** Python 3.11+ / FastAPI · LangGraph · LLM Serving: dev — LM Studio (OpenAI-compatible, `APP_LLM_BASE_URL`), целевой — vLLM Qwen3-8B-AWQ (ADR-001, дополнение) · Qdrant · Neo4j Community · PostgreSQL 16 · Traefik · OTel→Jaeger/Prometheus/Grafana · Langfuse (self-hosted, опциональный compose `docker-compose.langfuse.yml`) · React SPA.
 - **Железо:** RTX 5070 Ti 16GB VRAM (Blackwell/sm_120 → нужен образ vLLM с CUDA ≥12.8), Windows + Docker Desktop (WSL2, GPU passthrough).
 - **Онтология графа (4 типа узлов, не усложнять):**
   - `(:Act {id, title, doc_number, date, status})`
@@ -106,7 +106,7 @@
   5. Оркестрация (LangGraph vs LlamaIndex Workflows)
   6. GraphRAG-подход (онтология 4 узлов; гибридная экстракция: детерминированные рёбра из метаданных XML + LLM-экстракция Concept)
   7. Security/RBAC (ACL pre-fetch, JWT; Keycloak — rejected alternative)
-  8. Observability (OTel→Jaeger/Prometheus/Grafana; Langfuse внешний)
+  8. Observability (OTel→Jaeger/Prometheus/Grafana; Langfuse self-hosted опциональным compose)
   9. Embeddings (bge-m3 + bge-reranker-v2-m3; CPU-in-process trade-off)
   10. Deployment strategy (compose dev → minikube target)
   11. Устойчивость к ограничениям доступа из РФ: план Б (зеркала Docker Hub/PyPI/HF) — применяется только при фактической недоступности, дефолт — официальные источники
@@ -134,7 +134,7 @@
 - [x] ADR-005 Оркестрация: LangGraph vs LlamaIndex Workflows
 - [x] ADR-006 GraphRAG: онтология 4 узлов, гибридная экстракция (метаданные XML без LLM + LLM для Concept)
 - [x] ADR-007 Security/RBAC: JWT от backend, pre-fetch ACL; Keycloak — rejected alternative
-- [x] ADR-008 Observability: OTel→Jaeger/Prometheus/Grafana; Langfuse внешний
+- [x] ADR-008 Observability: OTel→Jaeger/Prometheus/Grafana; Langfuse self-hosted опц. compose + langfuse-python SDK
 - [x] ADR-009 Embeddings: bge-m3 + bge-reranker-v2-m3; CPU-in-process trade-off
 - [x] ADR-010 Deployment: compose dev → minikube target
 - [x] ADR-011 РФ-доступность: дефолт — официальные источники, план Б — зеркала через env-переменные
@@ -390,7 +390,7 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 - [x] Acceptance зафиксирован: User B (viewer) не получает контент SECRET-акта ни в
       ответе, ни в цитатах, ни через расширение графа; User A (analyst) получает
       INTERNAL ✓
-- [ ] Коммиты подшагами `stage-6(security): ...` + тег `stage/6`
+- [x] Коммиты подшагами `stage-6(security): ...` + тег `stage/6`
 
 Уроки этапа (учесть далее):
 - StubEmbedder.encode возвращает список векторов — при прямых вызовах ретривера в
@@ -401,14 +401,64 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 
 ### [ ] Этап 7. Observability (полные три столпа)
 **Deliverables:**
-- **Трейсы:** OTel SDK + auto-instrumentation (FastAPI, httpx, SQLAlchemy) + ручные спаны на каждом узле LangGraph; экспорт в Jaeger через otel-collector; корреляция `X-Trace-Id`/`traceparent` от фронта через Traefik → backend → все внешние вызовы; Langfuse получает трейсы промптов (внешний URL из `.env`, отключаемо).
+- **Трейсы:** OTel SDK + instrumentation (httpx, SQLAlchemy) + ручные спаны на каждом узле LangGraph; экспорт в Jaeger через otel-collector; корреляция `X-Trace-Id`/`traceparent` от фронта через Traefik → backend → все внешние вызовы; Langfuse получает трейсы промптов через langfuse-python SDK (URL из `.env`, отключаемо).
 - **Метрики:** Prometheus-эндпоинт backend: RPS, latency-гистограммы per endpoint и per узел графа, счётчики ошибок/статусов (`degraded`/`empty`), размер контекста; дашборд Grafana (json в `infra/grafana/`): latency, RPS, tokens/sec с vLLM.
 - **Логи:** структурный JSON-формат, уровни по env (`APP_LOG_LEVEL`), в каждой строке `trace_id`, `request_id`, `user_id`; логи запросов и результатов guardrails пишутся также в PG (audit_log) для демо.
+- **Langfuse:** опциональный self-hosted compose (`infra/docker-compose.langfuse.yml`) на существующих образах.
 **Acceptance:**
 - после запроса в Jaeger виден полный трейс со спанами всех узлов графа и внешних вызовов;
-- переданный клиентом `X-Trace-Id` виден в трейсе, эхо возвращается в ответе;
+- переданный клиентом `X-Trace-Id` виден в трейсе (== trace id), эхо возвращается в ответе;
 - Grafana показывает живые метрики при нагрузке; в логах каждая строка содержит тот же trace_id, что и трейс.
 **Тесты:** unit middleware (генерация/проброс X-Trace-Id, инъекция в логи), integration «после запроса существует трейс (Jaeger API) и метрики обновились (/metrics)», тест что лог-строки парсятся как JSON и содержат trace_id. Postman: `/metrics`, проверка заголовков X-Trace-Id/X-Request-Id.
+
+Решения этапа (зафиксировано при планировании):
+- **Единый trace_id:** серверный span создаётся в нашем CorrelationIdMiddleware (НЕ FastAPI-instrumentor):
+  W3C-extract из `traceparent`; если его нет — SpanContext собирается из `X-Trace-Id`
+  (валидный 32-hex берётся как есть, произвольное значение хешируется sha256).
+  Итог: Jaeger trace == X-Trace-Id == trace_id в логах. httpx и SQLAlchemy инструментируются
+  auto-instrumentation'ом (исходящие вызовы LLM/Qdrant attach'атся к текущему контексту);
+- **Метрики — prometheus-client напрямую** (без OTel Metrics API): HTTP-middleware по
+  route-template (исключая /health,/metrics из шума) + бизнес-метрики чата
+  (`chat_status_total{ok|degraded|empty}`, guardrail-блокировки, длительность узлов графа,
+  iterations, размер контекста);
+- **Логи:** user_id — contextvar, заполняется при аутентификации; результаты guardrails
+  (blocked/sanitized/injection) дублируются в audit_log best-effort (не ломают ответ);
+- **Langfuse:** НЕ «внешний», а self-hosted опциональный compose `infra/docker-compose.langfuse.yml`,
+  проект `graphrag-langfuse`, повторяет рабочий стек v3 на Redis (web+worker+postgres+clickhouse+
+  minio+redis, существующие локальные образы). web подключён к сети `graphrag_edge`:
+  backend ходит на http://langfuse-web:3000, Traefik → langfuse.localhost; хост-порт только у web
+  (`APP_LANGFUSE_PORT`, default 3300) — не конфликтует с независимо поднятым инстансом.
+  Интеграция — langfuse-python SDK: session = X-Trace-Id, промпты/комплиты генераций;
+  отключаемо `APP_LANGFUSE_ENABLED=false`, graceful при недоступности (таймауты, flush best-effort);
+- **Ресурсная гигиена тестов:** pytest-timeout (unit ≤120s / integration ≤300s на тест),
+  unit/integration — на фейках без LM Studio, newman всегда с `--timeout-request`.
+
+Чек-лист выполнения:
+
+**A. Документация**
+- [x] ADR-008 переформулирован: Langfuse не «внешний», а self-hosted опциональный compose; зафиксирован выбор langfuse-python SDK (+ дополнение этапа 7)
+- [x] PLAN.md/dataflow.md синхронизированы («внешний» убран); чек-лист этапа 7 добавлен
+
+**B. Инфраструктура**
+- [ ] `infra/docker-compose.langfuse.yml` — отдельный проект graphrag-langfuse на существующих образах; web → graphrag_edge, Traefik langfuse.localhost, healthchecks, пины версий
+- [ ] `.env.example`: блок APP_LANGFUSE_* (backend) + креды стека Langfuse; старый LANGFUSE_* убран
+- [ ] Grafana: provisioning dashboards-провайдера + json-дашборд (RPS, latency p50/p95, статусы чата, узлы графа, tokens/sec vLLM)
+
+**C. Backend — трейсы и логи**
+- [ ] deps: opentelemetry-instrumentation-httpx/sqlalchemy, langfuse, pytest-timeout; config: APP_LANGFUSE_URL/PUBLIC_KEY/SECRET_KEY/ENABLED
+- [ ] единый trace_id: server-span в CorrelationIdMiddleware (W3C extract | X-Trace-Id→SpanContext), httpx+SQLAlchemy instrumentation; traced_node узлов графа сохранён
+- [ ] user_id в JSON-логах (contextvar + auth-deps); guardrails→audit_log (blocked/sanitized/injection), best-effort
+
+**D. Backend — метрики и Langfuse**
+- [ ] metrics-middleware (route template) + бизнес-метрики чата/графа/guardrails; реальный `/metrics` (prometheus_client), исключения /health,/metrics
+- [ ] Langfuse-обвязка: init в lifespan, генерации в llm/client, flush best-effort, disabled-ветка
+
+**E. Тесты и приёмка**
+- [ ] unit: SpanContext от X-Trace-Id (валидное/произвольное/отсутствие), JSON-логи содержат trace_id/user_id, `/metrics` отдаёт счётчики, Langfuse-disabled путь
+- [ ] integration против compose: после запроса трейс есть в Jaeger API и найден по X-Trace-Id; `/metrics` обновился; чат работает при выключенном/недоступном Langfuse
+- [ ] Postman: `/metrics` + проверка эха X-Trace-Id/X-Request-Id; полный newman зелёный против пересобранного образа `graphrag/backend:stage7`
+- [ ] Acceptance зафиксирован: полный трейс в Jaeger (узлы графа + внешние вызовы) ✓; переданный X-Trace-Id == trace id трейса и эхо в ответе ✓; Grafana живые метрики ✓; логи содержат тот же trace_id ✓
+- [ ] make lint + pytest зелёные; коммиты подшагами `stage-7(...)`: docs → infra → tracing → logs → metrics → langfuse → tests; тег `stage/7`
 
 ### [ ] Этап 8. Фронтенд React SPA (минимальный)
 **Deliverables:** Vite + React + TS, без Redux/UI-китов — хуки + чистый CSS (тёмная тема). Экраны: Login (JWT), Chat (SSE-стриминг, цитаты, путь по графа «чипами»), Admin (кнопка ingestion + статус). nginx-контейнер за Traefik на `/`.
@@ -422,7 +472,7 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 **Тесты:** newman exit-code = gate; скрипт нагрузочного запуска воспроизводим.
 
 ### [ ] Этап 10. Minikube (последний этап)
-**Deliverables:** `infra/helm/` (или сырые манифесты): Deployments, Services, ConfigMaps/Secrets, Ingress (Traefik addon или IngressRoute), PVC для PG/Qdrant/Neo4j, GPU-ресурсы на поде vLLM, подключение к внешнему Langfuse (host-docker). Здесь же снимается видео-демо.
+**Deliverables:** `infra/helm/` (или сырые манифесты): Deployments, Services, ConfigMaps/Secrets, Ingress (Traefik addon или IngressRoute), PVC для PG/Qdrant/Neo4j, GPU-ресурсы на поде vLLM, подключение к Langfuse (compose-стек graphrag-langfuse или host-docker). Здесь же снимается видео-демо.
 **Acceptance:** весь флоу работает в minikube; тот же newman проходит против ingress-host.
 **Тесты:** newman против minikube.
 
