@@ -6,7 +6,9 @@
 
 import json
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -53,6 +55,27 @@ class LLMClient:
         """complete + извлечение JSON из ответа (модели любят добавлять prose/```json)."""
         raw = await self.complete(system, user, **kwargs)  # type: ignore[arg-type]
         return parse_loose_json(raw)
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+    ) -> AsyncIterator[str]:
+        """Стриминг токенов генерации (SSE-эндпоинт чата, этап 5)."""
+        response: Any = await self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        async for chunk in response:
+            if chunk.choices:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
 
 
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)

@@ -90,6 +90,31 @@ class Settings(BaseSettings):
     chunk_max_chars: int = Field(default=1800, ge=200)
     chunk_overlap_chars: int = Field(default=200, ge=0)
 
+    # --- RAG / Query pipeline (этап 5) ---
+    rag_vector_top_k: int = Field(default=8, ge=1)
+    rag_final_top_n: int = Field(default=5, ge=1)
+    rag_graph_hops: int = Field(default=1, ge=1, le=2)
+    agent_max_iterations: int = Field(default=2, ge=1, le=5)
+
+    # --- Генерация (vLLM/LM Studio) ---
+    generate_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    generate_max_tokens: int = Field(default=1024, ge=64)
+
+    # --- Reranker (bge-reranker-v2-m3, CPU-in-process, ADR-009) ---
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_device: Literal["cpu", "cuda"] = "cpu"
+
+    # --- Chat / память агента (история сессии из PG) ---
+    chat_history_limit: int = Field(default=8, ge=0)
+
+    # --- Guardrails (санитайзер всегда включён; LLM-классификатор отключаемо) ---
+    guardrail_max_query_chars: int = Field(default=2000, ge=100)
+    guardrail_use_llm: bool = True
+
+    # --- Трейсинг (минимальный OTel этапа 5; полные три столпа — этап 7) ---
+    tracing_enabled: bool = True
+    otel_exporter_endpoint: str = "http://otel-collector:4318/v1/traces"
+
     # --- Ingestion ---
     ingest_corpus_dir: Path = Path("../corpus_test")
     ingest_extract_concepts: bool = False

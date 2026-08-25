@@ -74,3 +74,38 @@ class AuditLog(Base):
     detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class ChatSession(Base):
+    """Диалог пользователя с агентом (Memory module живёт в PG, ADR-005)."""
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_pk)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    messages: Mapped[list["ChatMessage"]] = relationship(back_populates="chat_session")
+
+
+class ChatMessage(Base):
+    """Сообщение диалога; sources хранит цитаты ответа для аудита/демо RBAC."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_pk)
+    chat_session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_sessions.id"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text)
+    sources: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    chat_session: Mapped[ChatSession] = relationship(back_populates="messages")

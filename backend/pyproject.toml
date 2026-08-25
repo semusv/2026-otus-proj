@@ -19,6 +19,10 @@ dependencies = [
     "neo4j>=6.2.0",
     "sentence-transformers>=6.0.0",
     "openai>=3.3.1",
+    "langgraph>=1.2.11",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
 ]
 
 [dependency-groups]
