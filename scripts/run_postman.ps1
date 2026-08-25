@@ -21,6 +21,10 @@ New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $jsonReport = Join-Path $resultsDir "newman-$stamp.json"
 
+# gate гоняет только безопасные папки; запуск ingestion - строго opt-in
+$folders = @("00-system", "10-auth", "20-users", "30-ingest", "40-chat-rbac")
+if ($IngestRun) { $folders += "ingest-run OPTIONAL full ingestion" }
+
 $args = @(
     "--yes", "newman", "run", $collection,
     "-e", $environment,
@@ -29,8 +33,8 @@ $args = @(
     "--reporters", "cli,json",
     "--reporter-json-export", $jsonReport
 )
+foreach ($f in $folders) { $args += @("--folder", $f) }
 if ($BaseUrl -ne "") { $args += @("--env-var", "baseURL=$BaseUrl") }
-if ($IngestRun) { $args += @("--folder", "ingest-run (ОПЦИЯ: полный прогон, в gate не входит)") }
 
 Write-Host "== newman run: $collection"
 & npx @args

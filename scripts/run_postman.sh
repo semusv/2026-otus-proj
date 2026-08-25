@@ -23,11 +23,18 @@ set -- \
     --reporters cli,json \
     --reporter-json-export "$JSON_REPORT"
 
+# gate гоняет только безопасные папки; запуск ingestion - строго opt-in
+FOLDERS="00-system 10-auth 20-users 30-ingest 40-chat-rbac"
+if [ "${INGEST_RUN:-0}" = "1" ]; then
+    FOLDERS="$FOLDERS ingest-run OPTIONAL full ingestion"
+fi
+
+for f in $FOLDERS; do
+    set -- "$@" --folder "$f"
+done
+
 if [ -n "${1:-}" ]; then
     set -- "$@" --env-var "baseURL=$1"
-fi
-if [ "${INGEST_RUN:-0}" = "1" ]; then
-    set -- "$@" --folder "ingest-run (ОПЦИЯ: полный прогон, в gate не входит)"
 fi
 
 echo "== newman run: $COLLECTION"
