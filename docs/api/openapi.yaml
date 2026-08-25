@@ -116,8 +116,68 @@ paths:
                 $ref: '#/components/schemas/IngestStatusResponse'
         '403':
           description: Не admin
+  /api/chat:
+    post:
+      tags:
+      - chat
+      summary: Вопрос агенту GraphRAG (SSE-стриминг или JSON при stream=false)
+      description: 'Конвейер: guardrails -> planner -> retrieval (вектор+граф, ACL pre-fetch) -> fusion -> rerank -> generate
+        -> evaluate (re-plan <= APP_AGENT_MAX_ITERATIONS) -> guardrail_out (проверка цитат).
+
+
+        При stream=true возвращает text/event-stream: события `status`, `token`, `done`, `error` (формат - event:\ndata:\n\n).
+        При stream=false - обычный JSON.'
+      operationId: chat_api_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                title: Response Chat Api Chat Post
+        '401':
+          description: Нет/невалидный JWT
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    ChatRequest:
+      properties:
+        message:
+          type: string
+          maxLength: 8000
+          minLength: 1
+          title: Message
+          description: Вопрос пользователя (санитайзер и guardrails применяются на сервере)
+          examples:
+          - Какие требования к раскрытию информации эмитентами?
+        session_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Session Id
+          description: Идентификатор диалога; None - начать новый диалог
+        stream:
+          type: boolean
+          title: Stream
+          description: true - SSE-поток событий, false - JSON
+          default: true
+      type: object
+      required:
+      - message
+      title: ChatRequest
+      description: Запрос к агенту; ``stream=False`` возвращает обычный JSON (Postman/нагрузка).
     ErrorResponse:
       properties:
         code:
@@ -315,3 +375,5 @@ tags:
   description: Аутентификация и профиль пользователя
 - name: admin
   description: Управление ingestion корпуса (роль admin)
+- name: chat
+  description: Вопросы к GraphRAG-агенту (SSE-стриминг)

@@ -195,11 +195,12 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
 
     @traced_node("planner")
     async def planner_node(state: AgentState) -> dict[str, Any]:
+        replanned_before = bool(state.get("plan_query"))
         replans = state.get("replans", 0)
-        if replans == 0:
+        if not replanned_before:
             plan: Plan = initial_plan(state["question"])
             await _emit("planner", iteration=0, tools=plan.tools)
-            return {"tools": plan.tools, "plan_query": plan.query}
+            return {"tools": plan.tools, "plan_query": plan.query, "replans": 0}
 
         plan = await replan(
             runtime.llm,
@@ -209,12 +210,13 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
             feedback=state.get("evaluate_feedback", ""),
             refined_query=state.get("evaluate_refined_query") or None,
         )
-        await _emit("planner", iteration=replans, tools=plan.tools)
+        done_replans = replans + 1
+        await _emit("planner", iteration=done_replans, tools=plan.tools)
         return {
             "tools": plan.tools,
             "plan_query": plan.query,
-            "replans": replans,
-            "notes": [*[f"replan_{replans}:{plan.query}"[:160]], *state.get("notes", [])],
+            "replans": done_replans,
+            "notes": [*[f"replan_{done_replans}:{plan.query}"[:160]], *state.get("notes", [])],
         }
 
     @traced_node("tools")

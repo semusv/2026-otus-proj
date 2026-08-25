@@ -30,19 +30,24 @@ def setup_tracing(
 ) -> None:
     """Инициализирует глобальный TracerProvider (идемпотентно).
 
-    ``exporter`` - точка подмены в тестах (InMemorySpanExporter через SimpleSpanProcessor
-    передаётся напрямую процессором; здесь принимается готовый SpanExporter).
+    ``exporter`` - точка подмены в тестах: переданный экспортёр подключается через
+    SimpleSpanProcessor (синхронно, без фонового потока). Прод-путь - BatchSpanProcessor
+    с OTLP/HTTP экспортёром на ``endpoint``.
     """
     global _PROVIDER
     if _PROVIDER is not None:
         return
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     if enabled:
-        if exporter is None:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        if exporter is not None:
+            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-            exporter = OTLPSpanExporter(endpoint=endpoint)
-        provider.add_span_processor(_make_processor(exporter))
+            provider.add_span_processor(SimpleSpanProcessor(exporter))
+        else:
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
         logger.info("OTel-трейсинг включён: экспорт в %s", endpoint)
     else:
         logger.info("OTel-трейсинг отключён (APP_TRACING_ENABLED=false)")
@@ -50,23 +55,23 @@ def setup_tracing(
     _PROVIDER = provider
 
 
-def _make_processor(exporter: Any) -> Any:
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-    return BatchSpanProcessor(exporter)
-
-
 def get_tracer() -> Tracer:
     """Трейсер приложения (при выключенном SDK - no-op реализация)."""
     return trace.get_tracer("app.agents")
 
 
-def traced_node(name: str) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
-    """Декоратор узла LangGraph: каждый вызов узла = отдельный span с атрибутами статуса."""
+def traced_node(
+    name: str, *, tracer: Tracer | None = None
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
+    """Декоратор узла LangGraph: каждый вызов узла = отдельный span с атрибутами статуса.
+
+    ``tracer`` - точка подмены в тестах (изолированный провайдер без глобального состояния).
+    """
+    tr = tracer or get_tracer()
 
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         async def wrapper(state: dict[str, Any]) -> T:
-            with get_tracer().start_as_current_span(f"graph.{name}") as span:
+            with tr.start_as_current_span(f"graph.{name}") as span:
                 span.set_attribute("graph.node", name)
                 try:
                     result = await func(state)

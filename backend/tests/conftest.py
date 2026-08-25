@@ -23,6 +23,8 @@ def settings_factory() -> Callable[..., Settings]:
             "neo4j_password": SecretStr("test_neo4j_password"),
             "llm_base_url": "http://llm.test/v1",
             "llm_model": "test-model",
+            # юнит-контур не должен создавать OTLP-экспортёров (шум/сеть)
+            "tracing_enabled": False,
         }
         base.update(overrides)
         return Settings(_env_file=None, **base)  # type: ignore[arg-type]

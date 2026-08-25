@@ -41,8 +41,8 @@ def fallback_replan(
     question: str,
     refined_query: str | None,
 ) -> Plan:
-    """Правила без LLM: добавляем недостающий инструмент, уточняем запрос."""
-    tools = list(DEFAULT_TOOLS) if not previous_tools else list(previous_tools)
+    """Правила без LLM: сохраняем полный набор инструментов, уточняем запрос."""
+    tools = sorted(set(previous_tools) | set(DEFAULT_TOOLS), key=DEFAULT_TOOLS.index)
     query = (refined_query or question).strip() or question
     cleaned, _ = sanitize_query(query)
     return Plan(tools=tools, query=cleaned or question)
