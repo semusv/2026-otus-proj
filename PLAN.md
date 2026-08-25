@@ -601,10 +601,100 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
    имён, ручные аккаунты не затрагивает). Интеграционные тесты уже изолированы: свежие БД
    graphrag_itg_* на каждую сессию.
 
-### [ ] Этап 9. E2E Postman + нагрузочный отчёт
+### [x] Этап 9. E2E Postman + нагрузочный отчёт
 **Deliverables:** полная коллекция Postman (`tests/postman/`: env local, сценарии auth → ingest status → chat RBAC → health/metrics), прогон через Newman CLI `scripts/run_postman.(ps1|sh)`. Нагрузочный тест (locust или k6) на `/api/chat` (non-stream) и `/health` → `docs/load-report.md` (RPS, p50/p95, токены/сек на RTX 5070 Ti).
 **Acceptance:** `make test-postman` зелёный; отчёт с цифрами готов.
 **Тесты:** newman exit-code = gate; скрипт нагрузочного запуска воспроизводим.
+
+Решения этапа (зафиксировано при планировании):
+- **Коллекция консолидируется в `tests/postman/graphrag.postman_collection.json`**: слияние полной
+  коллекции этапа 7 (system/auth/admin-ingest/chat/rbac/observability) и пользовательской этапа 8
+  (users/RBAC, динамические qa_* пользователи с run_id). Корневая папка `postman/` упраздняется;
+  legacy `collection.json` заменяется консолидированной версией;
+- **Базовый URL по умолчанию — Traefik `http://api.localhost`** (полный путь как в демо:
+  Traefik → backend); прямое `127.0.0.1:8000` остаётся переменной окружения;
+- **Запуск ingestion (POST /admin/ingest) НЕ входит в gate-прогон** — полный re-ingest корпуса
+  жжёт CPU 10–30 мин и делает параллельные чат-проверки недетерминированными. Запрос живёт в
+  отдельной opt-in папке `ingest-run`, включается флагом `-IngestRun` скрипта; в gate входят
+  read-only проверки: статус ingestion (схема состояния), 401 анонима, 403 viewer'а;
+- **Gate = `make test-postman`** → `scripts/run_postman.ps1|.sh`: newman c `--timeout-request`
+  (зависание запроса не подвешивает прогон), exit-code newman'а пробрасывается наружу;
+  JSON-отчёт прогона пишется в `scripts/load_test/results/` (вне git);
+- **Нагрузочный инструмент — locust** (python-стек уже в uv; k6 потребовал бы отдельной установки):
+  запуск `uv run --with locust==<pin>` БЕЗ добавления в основные зависимости backend;
+  headless-режим, фиксированный `--run-time` (никаких бесконечных прогонов),
+  таймауты на каждом запросе;
+- **Профили нагрузки разделены**: `health` (лёгкий эндпоинт, высокий RPS) и `chat` (non-stream,
+  тяжёлый LLM-конвейер, мало виртуальных пользователей) — смешивать их в одном прогоне бессмысленно;
+  параметры (users/spawn/runtime/host) — env-переменные `LOAD_*`, дефолты в скрипте;
+- **tokens/sec меряется отдельным micro-bench** (`scripts/load_test/bench_llm.py`): прямые вызовы
+  OpenAI-совместимого эндпоинта LM Studio с подсчётом `usage.completion_tokens` (API чата бэкенда
+  usage не отдаёт) — последовательно и с малым параллелизмом; это честная метрика serving-движка
+  на RTX 5070 Ti, независимая от конвейера RAG;
+- **Контроль ресурсов во время прогонов**: docker stats снапшоты до/во время/после пишутся
+  рядом с результатами нагрузочного прогона (в отчёт попадают наблюдения по CPU/RAM контейнеров);
+- Отчёт — `docs/load-report.md`: стенд, методика, таблицы результатов, выводы, воспроизведение.
+
+Чек-лист выполнения:
+
+**A. Документация**
+- [x] решения + чек-лист этапа 9 в PLAN.md
+
+**B. Консолидация Postman**
+- [x] `tests/postman/graphrag.postman_collection.json` — единая коллекция:
+      system (health/metrics/trace-echo) → auth → users (этап 8) → ingest-status (read-only,
+      start в opt-in папке) → chat RBAC (SSE viewer/analyst, non-stream admin, память,
+      injection, чужая сессия, поддельный Bearer)
+- [x] `tests/postman/env.local.json` — baseURL=http://api.localhost (Traefik), все переменные токенов
+- [x] корневая папка `postman/` удалена, ссылки (Makefile/README/docs) обновлены
+
+**C. Скрипты прогона**
+- [x] `scripts/run_postman.ps1` + `.sh` (newman CLI, timeout-request, exit-code gate,
+      whitelist безопасных папок, opt-in -IngestRun/INGEST_RUN)
+- [x] Makefile: `test-postman` (gate), `load-test`, `bench-llm`; README обновлены
+
+**D. Нагрузочный стенд**
+- [x] `scripts/load_test/locustfile.py` — профили health/chat (JWT on_start, stream=false,
+      таймауты, статусы ответа чата в кастомных метриках, вопрос через LOAD_CHAT_QUESTION)
+- [x] `scripts/run_load_test.ps1` + `.sh` — headless, фиксированный run-time, CSV+html,
+      docker-stats снапшоты до/середина/после (не роняют прогон)
+- [x] `scripts/load_test/bench_llm.py` — tokens/sec (sequential + parallel) c usage из API движка
+
+**E. Прогоны и приёмка**
+- [x] newman gate зелёный против работающего стека через Traefik:
+      36 запросов / 55 assertions / 0 fail, ~1 мин 13 с (после фиксов)
+- [x] профили выполнены, docker stats зафиксированы, машина отзывчива:
+      health 25u×60s = 13056 req, RPS 220.7, p95=11ms, 0 fail;
+      chat seq 1u×300s = 31 ход, 100% ok, p50=7.2s;
+      chat ×4u×180s = 35 ходов, 100% ok, p50=17s, агрегатно 0.20 RPS;
+      LLM-bench: 258 tok/s seq → 389 tok/s @4 воркеров (qwen3.5-2b, RTX 5070 Ti)
+- [x] `docs/load-report.md` с цифрами (RPS, p50/p95/p99, tokens/sec RTX 5070 Ti,
+      найденные проблемы, воспроизведение)
+- [x] коммиты подшагами `stage-9(...)` + тег `stage/9`
+
+Уроки этапа (учесть далее):
+- **newman без фильтра папок выполняет ВСЁ**: деструктивные/тяжёлые сценарии
+  (запуск ingestion жжёт CPU 10–30 мин) держать в отдельной opt-in папке и
+  гонять gate по ЯВНОМУ whitelist `--folder`;
+- **X-Trace-Id**: сервер берёт как есть только валидный 32-hex, произвольные
+  значения хешируются sha256 — для сквозных проверок эха клиент должен слать hex;
+- **пустой assistant в истории ломает генерацию** (LM Studio jinja «No user query
+  found») и каскадно деградит сессию по кругу: память не сохраняет и
+  отфильтровывает пустые ответы (fix этапа 9, тесты test_memory_hygiene);
+- **переполненный контекст генерации** (top-k × chunk_max_chars + граф-факты +
+  история) на малых окнах модели обрезает user-запрос → нужен явный бюджет
+  `APP_GENERATE_CTX_CHAR_BUDGET` с сохранением маркеров [S#];
+- **порядок пары user/assistant при равных created_at не гарантирован**
+  (тай-брейк по случайному uuid): явный сдвиг +1 мкс в save_turn;
+- **LM Studio JIT** отвечает 400 «Model reloaded.» при переключении моделей —
+  ретраи нужны на всех клиентах движка (LLMClient и bench_llm);
+- **вопрос для нагрузочного профиля чата** должен быть конкретным по корпусу:
+  расплывчатые формулировки уводят evaluate в re-plan loop (дизайн агента) и
+  размывают latency (7 с против 38 с);
+- Windows/WSL2 под нагрузкой может не стартовать новые процессы (paging file):
+  docker-stats снапшоты в раннере сделаны необязательными, чтобы не ронять прогон;
+- расплывчатый ответ конвейера «degraded» ≠ сбой: различать в ассертах
+  (`status=ok ⇒ answer непустой`, иначе допустим degraded/empty).
 
 ### [ ] Этап 10. Minikube (последний этап)
 **Deliverables:** `infra/helm/` (или сырые манифесты): Deployments, Services, ConfigMaps/Secrets, Ingress (Traefik addon или IngressRoute), PVC для PG/Qdrant/Neo4j, GPU-ресурсы на поде vLLM, подключение к Langfuse (compose-стек graphrag-langfuse или host-docker). Здесь же снимается видео-демо.
