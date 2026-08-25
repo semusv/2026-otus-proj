@@ -11,13 +11,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
+from qdrant_client import AsyncQdrantClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.config import Settings
 from app.core.errors import ForbiddenError, IngestAlreadyRunningError
-from app.db.models import User
+from app.db.base import get_session
+from app.db.models import ChatMessage, ChatSession, User
 from app.ingestion.pipeline import run_ingestion
-from app.schemas.admin import IngestStartResponse, IngestStatusResponse
+from app.schemas.admin import (
+    IngestStartResponse,
+    IngestStatusResponse,
+    Neo4jStats,
+    PostgresStats,
+    QdrantStats,
+    StorageStatsResponse,
+)
 
 logger = logging.getLogger("app.api.admin")
 
@@ -80,3 +91,45 @@ async def ingest_status(
 ) -> IngestStatusResponse:
     _require_admin(user)
     return IngestStatusResponse.model_validate(_state(request.app.state))
+
+
+@router.get(
+    "/stats",
+    response_model=StorageStatsResponse,
+    summary="Текущее наполнение хранилищ: Qdrant, Neo4j, PostgreSQL (агрегаты)",
+    responses={403: {"description": "Не admin"}},
+)
+async def storage_stats(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> StorageStatsResponse:
+    _require_admin(user)
+
+    settings: Settings = request.app.state.settings
+    qdrant_client: AsyncQdrantClient = request.app.state.qdrant_client
+    collection_info = await qdrant_client.get_collection(settings.qdrant_collection)
+
+    graph_retriever = request.app.state.graph_retriever
+    neo4j_counts = await graph_retriever.stats()
+
+    users_count = int(await session.scalar(select(func.count()).select_from(User)) or 0)
+    sessions_count = int(
+        await session.scalar(select(func.count()).select_from(ChatSession)) or 0
+    )
+    messages_count = int(
+        await session.scalar(select(func.count()).select_from(ChatMessage)) or 0
+    )
+
+    return StorageStatsResponse(
+        qdrant=QdrantStats(
+            collection=settings.qdrant_collection,
+            points=int(collection_info.points_count or 0),
+        ),
+        neo4j=Neo4jStats(**neo4j_counts),
+        postgres=PostgresStats(
+            users=users_count,
+            chat_sessions=sessions_count,
+            chat_messages=messages_count,
+        ),
+    )

@@ -166,6 +166,26 @@ class GraphRetriever:
     async def close(self) -> None:
         await self._driver.close()
 
+    async def stats(self) -> dict[str, int]:
+        """Счётчики узлов онтологии и рёбер графа (для admin-статистики, без ACL:
+        агрегаты-метаданные, не контент)."""
+        label_keys: tuple[tuple[str, str], ...] = (
+            ("Act", "acts"),
+            ("Authority", "authorities"),
+            ("Topic", "topics"),
+            ("Concept", "concepts"),
+        )
+        out: dict[str, int] = {}
+        async with self._driver.session() as session:
+            for label, key in label_keys:
+                res = await session.run(f"MATCH (n:{label}) RETURN count(n) AS c")
+                rows: list[dict[str, Any]] = await res.data()
+                out[key] = int(rows[0]["c"]) if rows else 0
+            rels = await session.run("MATCH ()-[r]->() RETURN count(r) AS c")
+            rel_rows: list[dict[str, Any]] = await rels.data()
+            out["relationships"] = int(rel_rows[0]["c"]) if rel_rows else 0
+        return out
+
     async def expand(
         self,
         seed_act_ids: list[str],

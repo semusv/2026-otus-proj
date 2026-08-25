@@ -26,7 +26,7 @@ paths:
       tags:
       - system
       summary: Метрики Prometheus
-      description: Базовый эндпоинт; полные метрики этапа 7 (ADR-008).
+      description: HTTP RPS/latency по маршрутам + бизнес-метрики чата/графа (этап 7, ADR-008).
       operationId: metrics_metrics_get
       responses:
         '200':
@@ -114,6 +114,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IngestStatusResponse'
+        '403':
+          description: Не admin
+  /admin/stats:
+    get:
+      tags:
+      - admin
+      summary: 'Текущее наполнение хранилищ: Qdrant, Neo4j, PostgreSQL (агрегаты)'
+      operationId: storage_stats_admin_stats_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageStatsResponse'
         '403':
           description: Не admin
   /api/chat:
@@ -308,6 +323,79 @@ components:
       - clearances
       title: MeResponse
       description: Профиль текущего пользователя (по Bearer-токену).
+    Neo4jStats:
+      properties:
+        acts:
+          type: integer
+          title: Acts
+        authorities:
+          type: integer
+          title: Authorities
+        topics:
+          type: integer
+          title: Topics
+        concepts:
+          type: integer
+          title: Concepts
+        relationships:
+          type: integer
+          title: Relationships
+      type: object
+      required:
+      - acts
+      - authorities
+      - topics
+      - concepts
+      - relationships
+      title: Neo4jStats
+      description: Узлы и рёбра графа знаний (по меткам онтологии ADR-006).
+    PostgresStats:
+      properties:
+        users:
+          type: integer
+          title: Users
+        chat_sessions:
+          type: integer
+          title: Chat Sessions
+        chat_messages:
+          type: integer
+          title: Chat Messages
+      type: object
+      required:
+      - users
+      - chat_sessions
+      - chat_messages
+      title: PostgresStats
+      description: Учётные записи и история диалогов.
+    QdrantStats:
+      properties:
+        collection:
+          type: string
+          title: Collection
+        points:
+          type: integer
+          title: Points
+      type: object
+      required:
+      - collection
+      - points
+      title: QdrantStats
+      description: Наполнение векторного хранилища.
+    StorageStatsResponse:
+      properties:
+        qdrant:
+          $ref: '#/components/schemas/QdrantStats'
+        neo4j:
+          $ref: '#/components/schemas/Neo4jStats'
+        postgres:
+          $ref: '#/components/schemas/PostgresStats'
+      type: object
+      required:
+      - qdrant
+      - neo4j
+      - postgres
+      title: StorageStatsResponse
+      description: Снимок текущего наполнения хранилищ (без прогресса прогонов).
     TokenResponse:
       properties:
         access_token:
