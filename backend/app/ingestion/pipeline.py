@@ -110,7 +110,9 @@ async def run_ingestion(
                 overlap_chars=settings.chunk_overlap_chars,
             )
 
-            vectors = embedder.encode([c.text for c in chunks])
+            # encode блокирует GIL надолго (torch/CPU) - только в отдельном потоке,
+            # иначе event loop стоит и API перестаёт отвечать на время прогона
+            vectors = await asyncio.to_thread(embedder.encode, [c.text for c in chunks])
             await qdrant.delete_act(act.id)
             stats.chunks_written += await qdrant.upsert_chunks(
                 [
