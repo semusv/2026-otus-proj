@@ -10,9 +10,10 @@ dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
-    "pyjwt>=2.10",
-    "pyyaml>=6.0.2",
-    "sqlalchemy[asyncio]>=2.0.40",
+    "PyJWT>=2.10",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0.2",
+    "SQLAlchemy[asyncio]>=2.0.40",
     "uvicorn[standard]>=0.34",
 ]
 
@@ -45,6 +46,7 @@ select = [
 ]
 ignore = [
     "RUF001", "RUF002", "RUF003",  # кириллица в строках/комментах — намеренно (проект русскоязычный)
+    "B008",  # Depends(...) в дефолтах параметров — канонический паттерн FastAPI
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -60,11 +62,15 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
-warn_unused_configs = true
+warn_unused_configs = false  # overrides для migrations/scripts нужны на следующих этапах
 
 [[tool.mypy.overrides]]
 module = ["alembic.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["migrations.*", "scripts.*"]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
