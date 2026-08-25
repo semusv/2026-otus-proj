@@ -62,6 +62,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     setup_error_handlers(app)
     app.add_middleware(CorrelationIdMiddleware)
+    # Метрики добавляются ПОСЛЕ correlation => снаружи (измеряет весь конвейер запроса);
+    # /health и /metrics исключены из сбора внутри middleware
+    from app.observability.metrics import MetricsMiddleware as PrometheusMetrics
+
+    app.add_middleware(PrometheusMetrics)
 
     app.state.db = Database(cfg)
 

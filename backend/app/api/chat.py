@@ -22,6 +22,7 @@ from app.agents.graph import (
 from app.api.deps import audit_context, get_current_user
 from app.core.context import get_trace_id
 from app.db.models import User
+from app.observability.metrics import observe_chat_status
 from app.observability.tracing import get_tracer
 from app.schemas.chat import ChatRequest, ChatResponse, CitationOut, sse_format
 
@@ -121,6 +122,7 @@ async def _stream_generator(
         "notes": final.get("notes", []),
         "trace_id": trace_id,
     }
+    observe_chat_status(str(payload["status"]))
     yield sse_format("done", payload)
 
 
@@ -169,6 +171,7 @@ async def chat(
                 citations=list(final.get("citations", [])),
                 trace_id=trace_id,
             )
+            observe_chat_status(str(final.get("status", "degraded")))
             return ChatResponse(
                 session_id=chat_session.id,
                 answer=str(final.get("answer", "")),

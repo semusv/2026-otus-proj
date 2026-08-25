@@ -161,6 +161,9 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
 
     async def _audit_guardrail_event(kind: str, detail: dict[str, Any]) -> None:
         """Этап 7: значимые результаты guardrails дублируются в audit_log (best-effort)."""
+        from app.observability.metrics import observe_guardrail_event
+
+        observe_guardrail_event(kind)
         callback = runtime.extra.get("audit_guardrail")
         if callback is None:
             return
@@ -443,6 +446,13 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
                 "output",
                 {"session_id": state.get("session_id"), "events": out_notable[:8]},
             )
+
+        from app.observability.metrics import observe_agent_turn
+
+        observe_agent_turn(
+            iterations=int(state.get("replans", 0)) + 1,
+            context_chunks=len(acl.sources),
+        )
 
         return {
             "answer": checked.clean_answer,

@@ -2,9 +2,11 @@
 
 from fastapi import APIRouter, Response
 
+from app.observability.metrics import render_metrics
+
 router = APIRouter(tags=["system"])
 
-_VERSION = "0.5.0"
+_VERSION = "0.6.0"
 
 
 @router.get("/health", summary="Проверка живости сервиса")
@@ -15,15 +17,11 @@ def health() -> dict[str, str]:
 @router.get(
     "/metrics",
     summary="Метрики Prometheus",
-    description="Базовый эндпоинт; полные метрики этапа 7 (ADR-008).",
+    description="HTTP RPS/latency по маршрутам + бизнес-метрики чата/графа (этап 7, ADR-008).",
 )
 def metrics() -> Response:
-    body = (
-        "# HELP app_up Backend availability flag.\n"
-        "# TYPE app_up gauge\n"
-        "app_up 1\n"
-    )
-    return Response(content=body, media_type="text/plain; version=0.0.4")
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
 
 
 def get_version() -> str:

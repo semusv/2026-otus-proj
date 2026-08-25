@@ -20,6 +20,7 @@ import hashlib
 import logging
 import re
 import secrets
+import time
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -189,14 +190,19 @@ def traced_node(
 
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         async def wrapper(state: dict[str, Any]) -> T:
+            from app.observability.metrics import GRAPH_NODE_DURATION
+
             with tr.start_as_current_span(f"graph.{name}") as span:
                 span.set_attribute("graph.node", name)
+                started = time.perf_counter()
                 try:
                     result = await func(state)
                 except Exception as exc:
+                    GRAPH_NODE_DURATION.labels(node=name).observe(time.perf_counter() - started)
                     span.record_exception(exc)
                     span.set_attribute("graph.node.error", True)
                     raise
+                GRAPH_NODE_DURATION.labels(node=name).observe(time.perf_counter() - started)
                 updates = result if isinstance(result, dict) else {}
                 status = updates.get("status")
                 if isinstance(status, str):
