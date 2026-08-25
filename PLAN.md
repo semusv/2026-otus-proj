@@ -440,9 +440,13 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 - [x] PLAN.md/dataflow.md синхронизированы («внешний» убран); чек-лист этапа 7 добавлен
 
 **B. Инфраструктура**
-- [ ] `infra/docker-compose.langfuse.yml` — отдельный проект graphrag-langfuse на существующих образах; web → graphrag_edge, Traefik langfuse.localhost, healthchecks, пины версий
-- [ ] `.env.example`: блок APP_LANGFUSE_* (backend) + креды стека Langfuse; старый LANGFUSE_* убран
-- [ ] Grafana: provisioning dashboards-провайдера + json-дашборд (RPS, latency p50/p95, статусы чата, узлы графа, tokens/sec vLLM)
+- [x] `infra/docker-compose.langfuse.yml` — отдельный проект graphrag-langfuse на существующих образах; web → graphrag_edge, Traefik langfuse.localhost, healthchecks, пины версий
+      (нюансы: S3-env обязателен для актуального образа; Next.js биндится на $HOSTNAME → HOSTNAME=0.0.0.0;
+      worker health = /api/health на :3030; бакет MinIO создаёт init-джоба minio/mc;
+      LANGFUSE_INIT_* требует явные ORG_ID/PROJECT_ID/USER_ID — иначе игнорируется;
+      Traefik v3 фильтрует unhealthy-контейнеры — роутер появляется только после green healthcheck)
+- [x] `.env.example`: блок APP_LANGFUSE_* (backend) + креды стека Langfuse; старый LANGFUSE_* убран
+- [x] Grafana: provisioning dashboards-провайдера + json-дашборд (RPS, latency p50/p95, статусы чата, guardrails, узлы графа, итерации агента, размер контекста, vLLM)
 
 **C. Backend — трейсы и логи**
 - [ ] deps: opentelemetry-instrumentation-httpx/sqlalchemy, langfuse, pytest-timeout; config: APP_LANGFUSE_URL/PUBLIC_KEY/SECRET_KEY/ENABLED

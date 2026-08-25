@@ -1,0 +1,254 @@
+﻿# ============================================================================
+# Langfuse self-hosted (ОПЦИОНАЛЬНЫЙ стек, этап 7, ADR-008)
+#
+# Отдельный compose-проект (name: graphrag-langfuse) — поднимается независимо:
+#   cd infra && docker compose -f docker-compose.langfuse.yml up -d
+#
+# Состав повторяет рабочий стек Langfuse v3 на Redis:
+#   web + worker + postgres + clickhouse + minio + redis (без Kafka/Redpanda).
+# Образы пинятся tag@digest — гарантированно переиспользуются локальные,
+# повторный pull не требуется (см. также APP_DOCKER_REGISTRY, ADR-011).
+#
+# Сеть: только langfuse-web подключается к внешней graphrag_edge:
+#   - backend ходит на http://langfuse-web:3000 (APP_LANGFUSE_URL);
+#   - Traefik маршрутизирует UI на http://langfuse.localhost.
+# Хост публикует ТОЛЬКО web (127.0.0.1:${APP_LANGFUSE_PORT:-3300}) —
+# остальные БД наружу не торчат; конфликтов с независимо поднятым инстансом нет.
+# ============================================================================
+
+name: graphrag-langfuse
+
+# Общий env-блок web/worker (S3=MinIO обязателен для актуального образа v3)
+x-langfuse-env: &langfuse_env
+  NODE_ENV: production
+  # Next.js standalone биндится на $HOSTNAME; при двух сетях контейнера он резолвится
+  # во внутренний IP и Traefik (edge) получает 502. Явно вешаем на все интерфейсы.
+  HOSTNAME: 0.0.0.0
+  NEXTAUTH_URL: http://langfuse.localhost
+  NEXTAUTH_SECRET: ${APP_LANGFUSE_NEXTAUTH_SECRET:?APP_LANGFUSE_NEXTAUTH_SECRET is required}
+  SALT: ${APP_LANGFUSE_SALT:?APP_LANGFUSE_SALT is required}
+  ENCRYPTION_KEY: ${APP_LANGFUSE_ENCRYPTION_KEY:?APP_LANGFUSE_ENCRYPTION_KEY is required}
+  TELEMETRY_ENABLED: "false"
+  DATABASE_URL: postgresql://langfuse:${APP_LANGFUSE_POSTGRES_PASSWORD}@langfuse-postgres:5432/langfuse
+  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${APP_LANGFUSE_CLICKHOUSE_PASSWORD}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  REDIS_HOST: langfuse-redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ""
+  REDIS_TLS_ENABLED: "false"
+  # --- S3 (MinIO): event upload / media / batch export ---
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${APP_LANGFUSE_MINIO_ROOT_USER}
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${APP_LANGFUSE_MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${APP_LANGFUSE_MINIO_ROOT_USER}
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${APP_LANGFUSE_MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+  LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+  LANGFUSE_S3_BATCH_EXPORT_REGION: auto
+  LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${APP_LANGFUSE_MINIO_ROOT_USER}
+  LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${APP_LANGFUSE_MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_BATCH_EXPORT_PREFIX: batch-export/
+
+services:
+  langfuse-postgres:
+    image: ${APP_DOCKER_REGISTRY:-}postgres:17@sha256:2203e6282d9e7de7c24d7da234e2a744fb325df366a3fd8ed940e8abbee39527
+    container_name: graphrag-langfuse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${APP_LANGFUSE_POSTGRES_PASSWORD:?APP_LANGFUSE_POSTGRES_PASSWORD is required}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_pg_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  langfuse-redis:
+    image: ${APP_DOCKER_REGISTRY:-}redis:7@sha256:33d7c9a245edd95e6703a0addbeaa48fe40c3b3b4783627a72085155462ebfdb
+    container_name: graphrag-langfuse-redis
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  langfuse-clickhouse:
+    # Локальный тег :latest, фактическая версия 26.5.1.882 — пин по digest
+    image: ${APP_DOCKER_REGISTRY:-}clickhouse/clickhouse-server@sha256:07afc18d8a9706eb9d85c5c5d2752e5270f91bbc2894caeaecb73e4d0f603bf5
+    container_name: graphrag-langfuse-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: clickhouse
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${APP_LANGFUSE_CLICKHOUSE_PASSWORD:?APP_LANGFUSE_CLICKHOUSE_PASSWORD is required}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    networks:
+      - internal
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  langfuse-minio:
+    # Локальный тег :latest, фактическая версия RELEASE.2025-09-07T16-13-09Z — пин по digest
+    image: ${APP_DOCKER_REGISTRY:-}minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    container_name: graphrag-langfuse-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${APP_LANGFUSE_MINIO_ROOT_USER:?APP_LANGFUSE_MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${APP_LANGFUSE_MINIO_ROOT_PASSWORD:?APP_LANGFUSE_MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - langfuse_minio_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Одноразовая джоба: создаёт бакет langfuse в MinIO (авто-криейта в v3 нет)
+  langfuse-bucket-init:
+    image: ${APP_DOCKER_REGISTRY:-}minio/mc:latest
+    container_name: graphrag-langfuse-bucket-init
+    depends_on:
+      langfuse-minio:
+        condition: service_healthy
+    environment:
+      MC_HOST_lf: http://${APP_LANGFUSE_MINIO_ROOT_USER}:${APP_LANGFUSE_MINIO_ROOT_PASSWORD}@langfuse-minio:9000
+    entrypoint: >
+      /bin/sh -c "
+      until mc ready lf; do echo 'waiting for minio...'; sleep 2; done;
+      mc mb --ignore-existing lf/langfuse &&
+      echo 'bucket langfuse created' && exit 0"
+    networks:
+      - internal
+    restart: "no"
+
+  langfuse-worker:
+    image: ${APP_DOCKER_REGISTRY:-}langfuse/langfuse-worker:3@sha256:47e829d0174c50bd93dc200c2b8c815a0a03fb9fe72a22c4750948bd21cb32b3
+    container_name: graphrag-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-bucket-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *langfuse_env
+      PORT: "3030"
+    networks:
+      - internal
+    healthcheck:
+      # Worker: health на /api/health; Next.js слушает $HOSTNAME (0.0.0.0 из якоря)
+      test: ["CMD-SHELL", "wget -q --spider http://$${HOSTNAME}:3030/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  langfuse-web:
+    image: ${APP_DOCKER_REGISTRY:-}langfuse/langfuse:3@sha256:77f2372272fed46a64fcddda95b0fcad71ce4e0ce9f8bac26dc8c39a49d675f0
+    container_name: graphrag-langfuse-web
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-bucket-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *langfuse_env
+      PORT: "3000"
+      LANGFUSE_URL: http://langfuse.localhost
+      # Автоинициализация org/project/user с ЗАДАННЫМИ ключами API (dev).
+      # Актуальный образ требует ЯВНЫЕ *_ID — без них блок игнорируется (warning в логах)
+      LANGFUSE_INIT_ORG_ID: ${APP_LANGFUSE_INIT_ORG_ID:-org_graphrag_dev}
+      LANGFUSE_INIT_PROJECT_ID: ${APP_LANGFUSE_INIT_PROJECT_ID:-proj_platform_dev}
+      LANGFUSE_INIT_USER_ID: ${APP_LANGFUSE_INIT_USER_ID:-user_admin_dev}
+      LANGFUSE_INIT_ORGANIZATION_NAME: ${APP_LANGFUSE_INIT_ORG:-graphrag}
+      LANGFUSE_INIT_PROJECT_NAME: ${APP_LANGFUSE_INIT_PROJECT:-platform}
+      LANGFUSE_INIT_USER_EMAIL: ${APP_LANGFUSE_INIT_USER_EMAIL:-admin@graphrag.local}
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${APP_LANGFUSE_INIT_USER_PASSWORD:?APP_LANGFUSE_INIT_USER_PASSWORD is required}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${APP_LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${APP_LANGFUSE_SECRET_KEY:-}
+    ports:
+      - "127.0.0.1:${APP_LANGFUSE_PORT:-3300}:3000"
+    networks:
+      - internal
+      - edge
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: graphrag_edge
+      traefik.http.routers.langfuseui.rule: Host(`langfuse.localhost`)
+      traefik.http.routers.langfuseui.entrypoints: web
+      traefik.http.services.langfuseui.loadbalancer.server.port: "3000"
+    healthcheck:
+      # Next.js слушает на hostname контейнера (не 127.0.0.1) — проверяем через $HOSTNAME
+      test: ["CMD-SHELL", "wget -q --spider http://$${HOSTNAME}:3000/api/public/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+networks:
+  internal:
+    name: graphrag_langfuse_internal
+  edge:
+    external: true
+    name: graphrag_edge
+
+volumes:
+  langfuse_pg_data:
+    name: graphrag_langfuse_pg_data
+  langfuse_clickhouse_data:
+    name: graphrag_langfuse_clickhouse_data
+  langfuse_clickhouse_logs:
+    name: graphrag_langfuse_clickhouse_logs
+  langfuse_minio_data:
+    name: graphrag_langfuse_minio_data
