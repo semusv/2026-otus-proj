@@ -1,0 +1,43 @@
+/* Тёмно-синяя тема «midnight navy» — этап 8.
+   Все цвета только через переменные: ноль хардкодов в компонентах. */
+:root {
+  color-scheme: dark;
+
+  --bg: #0b1220;
+  --bg-gradient: linear-gradient(160deg, #0b1220 0%, #101a30 55%, #16233f 100%);
+  --surface: #121a2c;
+  --surface-2: #1a2440;
+  --border: #263450;
+  --border-strong: #33456b;
+
+  --accent: #4c8dff;
+  --accent-hover: #6da5ff;
+  --accent-dim: rgba(76, 141, 255, 0.14);
+  --accent-glow: rgba(76, 141, 255, 0.35);
+
+  --text: #e4eaf5;
+  --muted: #8fa1bf;
+  --faint: #5c6f92;
+
+  --ok: #3dd68c;
+  --warn: #f5b84f;
+  --err: #f26d6d;
+
+  --clearance-public-bg: rgba(61, 214, 140, 0.12);
+  --clearance-public-fg: #3dd68c;
+  --clearance-internal-bg: rgba(245, 184, 79, 0.14);
+  --clearance-internal-fg: #f5b84f;
+  --clearance-secret-bg: rgba(242, 109, 109, 0.14);
+  --clearance-secret-fg: #f26d6d;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --transition: 150ms ease;
+
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, 'JetBrains Mono', monospace;
+}
