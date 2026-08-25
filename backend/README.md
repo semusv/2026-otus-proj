@@ -1,14 +1,15 @@
-# Бэкенд GraphRAG Platform (этап 3)
+# Бэкенд GraphRAG Platform (этап 4)
 
-FastAPI-приложение: фундамент — конфиг, логи, корреляция запросов, БД, аутентификация.
-Карточка дополняется на каждом этапе (этап 4 — ingestion, этап 5 — LangGraph и т.д.).
+FastAPI-приложение: фундамент (конфиг, логи, корреляция, БД, аутентификация)
++ ingestion-конвейер RusLawOD → чанки → Qdrant + граф Neo4j.
+Карточка дополняется на каждом этапе (этап 5 — LangGraph и т.д.).
 
 ## Где что находится (`backend/`)
 
 ```
 backend/
 ├── pyproject.toml            # зависимости + конфиги ruff/mypy/pytest (uv)
-├── uv.lock                   # зафиксированные версии
+├── uv.lock                   # зафиксированные версии (torch - CPU-индекс PyTorch)
 ├── Dockerfile                # multi-stage: deps через uv → рантайм python:3.12-slim
 ├── alembic.ini               # миграции; URL берётся из APP_*-переменных
 ├── migrations/versions/      # 0001 — users/roles/sessions/audit_log (+сид ролей)
@@ -19,6 +20,7 @@ backend/
 │   │   ├── __init__.py       # api_router — агрегатор роутеров
 │   │   ├── system.py         # GET /health, GET /metrics (заглушка до этапа 7)
 │   │   ├── auth.py           # POST /auth/login, GET /auth/me
+│   │   ├── admin.py          # POST /admin/ingest (background task), GET /admin/ingest/status
 │   │   └── deps.py           # get_current_user (Bearer → JWT → сессия в PG), audit_context()
 │   ├── core/
 │   │   ├── security.py       # bcrypt, JWT HS256 (sub/role/jti/exp), resolve_clearances(role)
@@ -31,13 +33,29 @@ backend/
 │   │   ├── base.py           # Base(DeclarativeBase), Database (engine+сессии), get_session
 │   │   ├── models.py         # User, Role(RoleName), AuthSession, AuditLog
 │   │   └── seed.py           # сидинг ролей и 3 пользователей
+│   ├── llm/
+│   │   └── client.py         # LLMClient (OpenAI-совместимый), parse_loose_json
+│   ├── ingestion/
+│   │   ├── parser.py         # XML RusLawOD → ParsedAct (статусы/даты/keywords/classifier/refs)
+│   │   ├── cleaner.py        # чистка <ref>/<span> артефактов разметки
+│   │   ├── chunker.py        # разбивка по «Статья N.» (атомарно) + абзацный фолбэк с overlap
+│   │   ├── clearance.py      # детерминированный hash(act_id) → PUBLIC/INTERNAL/SECRET
+│   │   ├── ontology.py       # маппинг на онтологию графа (ADR-006)
+│   │   ├── embeddings.py     # bge-m3 lazy-load CPU (sentence-transformers)
+│   │   ├── concepts.py       # LLM-экстракция (:Concept), устойчива к сбоям LLM
+│   │   ├── qdrant_writer.py  # коллекция chunks, UUIDv5-идемпотентность, payload-index clearance
+│   │   ├── neo4j_writer.py   # MERGE-батчи Act/Authority/Topic/Concept + constraints
+│   │   ├── pipeline.py       # оркестратор прогона (run_ingestion)
+│   │   └── __main__.py       # CLI: python -m app.ingestion [--dir] [--concepts|--no-concepts]
 │   └── schemas/
 │       ├── auth.py           # LoginRequest, TokenResponse, MeResponse
+│       ├── admin.py          # IngestStartResponse, IngestStatusResponse
 │       └── errors.py         # ErrorResponse (единый формат ошибок)
 ├── tests/
 │   ├── conftest.py           # общая фабрика Settings для тестов
-│   ├── unit/                 # config / middleware / logging / security
-│   └── integration/          # auth-флоу против реальной PG (compose)
+│   ├── fixtures/ruslawod/    # XML-фикстуры по образцу реального корпуса
+│   ├── unit/                 # config/middleware/logging/security/parser/chunker/clearance/concepts
+│   └── integration/          # auth, admin API, ingestion против compose (PG/Qdrant/Neo4j)
 └── .venv/                    # создаётся `uv sync` (в git не входит)
 ```
 
@@ -76,6 +94,38 @@ backend/
 Логины (успех/неудачa) пишутся в `audit_log` c `request_id`/`trace_id`.
 Демо-пользователи: `viewer/analyst/admin` (пароли по умолчанию — только dev).
 
+### Ingestion (этап 4)
+
+Конвейер: XML RusLawOD → парсер → cleaner → чанкер («Статья N.», атомарно) →
+bge-m3 (CPU) → Qdrant (`chunks`, payload: act_id/title/chunk_no/clearance/text) →
+граф Neo4j (детерминированные ISSUED_BY/REFERENCES/HAS_TOPIC из метаданных +
+LLM-экстракция MENTIONS→Concept, флаг `APP_INGEST_EXTRACT_CONCEPTS`).
+
+Ключевые свойства:
+- **Идемпотентность**: точки Qdrant — UUIDv5(act_id, chunk_no) + delete перед upsert;
+  в Neo4j всё через MERGE; повторный прогон не создаёт дублей;
+- **Clearance детерминирован**: md5-хэш от act_id раскладывает акты по
+  PUBLIC/INTERNAL/SECRET с процентами из конфига — воспроизводимо между прогонами;
+- **Сбои не останавливают прогон**: битый XML → в `parse_errors`, недоступный LLM →
+  акт без Concepts.
+
+Запуск:
+
+```powershell
+# CLI с хоста (env из infra/.env; LM Studio/vLLM нужен только для --concepts)
+$env:APP_LLM_BASE_URL = "http://127.0.0.1:1234/v1"   # хост-запуск: не host.docker.internal
+$env:APP_LLM_MODEL    = "qwen3.5-2b"                  # НЕ-thinking модель для экстракции
+uv --directory backend run python -m app.ingestion --concepts
+
+# или через API (роль admin; корпус смонтирован в контейнер)
+POST http://api.localhost/admin/ingest          # 202 старт / 409 уже идёт
+GET  http://api.localhost/admin/ingest/status   # idle|running|done|error + stats
+```
+
+> Важно: «думающие» модели (qwen3.5-9b и т.п.) тратят весь бюджет токенов на
+> рассуждение и возвращают пустой content — для экстракции Concepts использовать
+> не-thinking модель (qwen3.5-2b проверена).
+
 ## Конфигурация (все APP_*)
 
 | Переменная | По умолчанию | Зачем |
@@ -86,6 +136,16 @@ backend/
 | `APP_PG_USER/PASSWORD/DB` | — обязательны | креды БД |
 | `APP_JWT_SECRET` | — обязателен | секрет HS256; без него старт запрещён |
 | `APP_JWT_TTL_MINUTES` | `30` | время жизни токена |
+| `APP_QDRANT_URL` | — обязательна | REST Qdrant (в compose подменяется на `http://qdrant:6333`) |
+| `APP_QDRANT_COLLECTION` | `chunks` | имя коллекции векторов |
+| `APP_NEO4J_URI` / `USER` / `PASSWORD` | — / `neo4j` / обязательна | bolt-подключение к графу |
+| `APP_LLM_BASE_URL/API_KEY/MODEL` | — / `lm-studio` / обязательна | OpenAI-совместимый endpoint (ADR-001) |
+| `APP_EMBEDDING_MODEL/BATCH_SIZE/DEVICE` | `BAAI/bge-m3` / 32 / `cpu` | эмбеддинги (ADR-009) |
+| `APP_CHUNK_MAX_CHARS` / `OVERLAP_CHARS` | 1800 / 200 | чанкинг |
+| `APP_INGEST_CORPUS_DIR` | `../corpus_test` | каталог XML (в compose: `/data/corpus`) |
+| `APP_INGEST_EXTRACT_CONCEPTS` | `false` | LLM-экстракция Concepts |
+| `APP_INGEST_INTERNAL_PERCENT` / `SECRET_PERCENT` | 20 / 10 | разметка clearance (остаток PUBLIC) |
+| `APP_INGEST_CONCEPT_MAX_PER_CHUNK` | 6 | лимит понятий с чанка |
 
 Источник значений: env процесса > `infra/.env` (для локальных скриптов) > дефолт.
 Шаблон — `infra/.env.example`.
@@ -99,15 +159,16 @@ compose) · `gpu_slow` (LLM-as-a-Judge, этап 5+).
 |---|---|
 | `make lint` | ruff check + mypy — **gate всех коммитов** |
 | `make fmt` | ruff format + autofix |
-| `make test-unit` | 25 тестов: fail-fast конфига, заголовки корреляции, JSON-логи, bcrypt/JWT (roundtrip, просрочка, кривая подпись), матрица clearances |
-| `make test-integration` | 8 тестов против PG: поднимает **изолируемую** БД `graphrag_itg_<hex>`, применяет миграции, прогоняет login/me/ошибки, проверяет строки sessions/audit_log |
+| `make test-unit` | 88 тестов: конфиг, корреляция, логи, JWT, парсер/чанкер/clearance/онтология, LLM-моки |
+| `make test-integration` | против compose: auth-флоу в изолируемой PG, admin API, ingestion (Qdrant+Neo4j, идемпотентность) |
 | `make test-all` | unit + integration |
 | `make seed-users` | (пере)создать viewer/analyst/admin в основной БД `graphrag` |
 | `make openapi-export` | перегенерировать `docs/api/openapi.yaml` после правок эндпоинтов |
 
 Интеграционные тесты сами создают и удаляют свою БД — основную не трогают;
-нужен только запущенный контейнер postgres (`docker compose -f infra/docker-compose.yml up -d postgres`).
-Postman/Newman-коллекция auth — `tests/postman/collection.json` (см. его README).
+ingestion-тесты используют отдельную коллекцию `chunks_test` и чистят граф после себя.
+Нужен запущенный стек: `docker compose -f infra/docker-compose.yml up -d postgres qdrant neo4j`.
+Postman/Newman-коллекция (auth + ingest) — `tests/postman/collection.json`.
 
 ## Повседневные команды
 
@@ -129,7 +190,6 @@ curl.exe --noproxy "*" -X POST http://api.localhost/auth/login ^
 
 ## Планы карточки (дозаполняется)
 
-- этап 4: модуль `app/ingestion/` — парсер XML RusLawOD, чанкер, bge-m3, Qdrant/Neo4j writers, `POST /admin/ingest`;
 - этап 5: `app/agents/graph.py` (LangGraph state machine), memory/planner/tools, SSE `/api/chat`;
 - этап 6: ACL pre-fetch фильтры (Qdrant payload filter + WHERE в Cypher);
 - этап 7: OTel-трейсы спанов узлов графа, Prometheus-метрики, audit_log из guardrails.

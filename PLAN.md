@@ -197,32 +197,32 @@ CLI-команда + `POST /admin/ingest` (background task). Разметка ч
 Чек-лист выполнения:
 
 **A. Зависимости и конфиг**
-- [ ] deps: qdrant-client, neo4j (async), sentence-transformers + CPU-torch (bge-m3, ADR-009)
-- [ ] config: APP_QDRANT_URL, APP_NEO4J_URI/USER/PASSWORD, APP_EMBEDDING_MODEL, APP_CHUNK_MAX_CHARS, APP_INGEST_* (clearance %, extract_concepts); `.env.example` дополнен
+- [x] deps: qdrant-client, neo4j (async), sentence-transformers + CPU-torch (bge-m3, ADR-009); openai SDK
+- [x] config: APP_QDRANT_URL, APP_NEO4J_URI/USER/PASSWORD, APP_EMBEDDING_MODEL, APP_CHUNK_MAX_CHARS, APP_INGEST_* (clearance %, extract_concepts); `.env.example` дополнен
 
 **B. Ядро ingestion (чистые функции)**
-- [ ] `ingestion/parser.py`: XML → `ParsedAct`; нормализация статусов; пустые keywords/classifier не падают
-- [ ] `ingestion/cleaner.py`: чистка артефактов разметки
-- [ ] `ingestion/chunker.py`: разбивка по «Статья N.», фолбэк — абзацы; max chars из конфига
-- [ ] clearance-резолвер: hash(act_id) → PUBLIC/INTERNAL/SECRET по процентам из конфига
-- [ ] маппинг онтологии: Act/Authority/Topic + ISSUED_BY/REFERENCES (только на акты корпуса)/HAS_TOPIC
+- [x] `ingestion/parser.py`: XML → `ParsedAct`; нормализация статусов; пустые keywords/classifier не падают
+- [x] `ingestion/cleaner.py`: чистка артефактов разметки
+- [x] `ingestion/chunker.py`: разбивка по «Статья N.», фолбэк — абзацы; max chars из конфига (статья атомарна: 1 статья = 1+ чанк)
+- [x] clearance-резолвер: hash(act_id) → PUBLIC/INTERNAL/SECRET по процентам из конфига
+- [x] маппинг онтологии: Act/Authority/Topic + ISSUED_BY/REFERENCES (только на акты корпуса)/HAS_TOPIC
 
 **C. Хранилища и модели**
-- [ ] `QdrantWriter`: коллекция `chunks` (dim 1024, cosine), payload-index clearance, batch upsert
-- [ ] `Neo4jWriter`: идемпотентные MERGE, constraints при init
-- [ ] embeddings: bge-m3 lazy-load CPU
-- [ ] `ConceptExtractor` (OpenAI-совместимый клиент, JSON-выдача, флаг APP_INGEST_EXTRACT_CONCEPTS)
+- [x] `QdrantWriter`: коллекция `chunks` (dim 1024, cosine), payload-index clearance, batch upsert; delete_act для чистого ре-ingest
+- [x] `Neo4jWriter`: идемпотентные MERGE, constraints при init
+- [x] embeddings: bge-m3 lazy-load CPU
+- [x] `ConceptExtractor` (OpenAI-совместимый клиент, JSON-выдача, флаг APP_INGEST_EXTRACT_CONCEPTS)
 
 **D. Оркестрация и API**
-- [ ] pipeline-оркестратор (`ingestion/pipeline.py`) + CLI `python -m app.ingestion`
-- [ ] `POST /admin/ingest` (admin-only, background task) + `GET /admin/ingest/status`
-- [ ] экспорт `docs/api/openapi.yaml`
+- [x] pipeline-оркестратор (`ingestion/pipeline.py`) + CLI `python -m app.ingestion`
+- [x] `POST /admin/ingest` (admin-only, background task) + `GET /admin/ingest/status`
+- [x] экспорт `docs/api/openapi.yaml`
 
 **E. Приёмка этапа**
-- [ ] unit: парсер/чанкер/clearance/онтология на фикстурах corpus_test — зелёные
-- [ ] integration против compose: узлы и векторы существуют, идемпотентность повторного прогона
-- [ ] полный прогон corpus_test c LM Studio: граф в Neo4j Browser, Concepts извлечены, векторы+payload в Qdrant
-- [ ] Postman: ingest + статус
+- [x] unit: парсер/чанкер/clearance/онтология на фикстурах corpus_test — зелёные (88 unit)
+- [x] integration против compose: узлы и векторы существуют, идемпотентность повторного прогона
+- [x] полный прогон corpus_test c LM Studio (qwen3.5-2b, не-thinking модель): 2331 чанк в Qdrant (dim=1024, payload с clearance), граф: Act=100, Authority=9, Topic=1065, Concept=5897, MENTIONS=7000, REFERENCES=14
+- [ ] Postman: ingest + статус (после пересборки образа backend)
 - [ ] `make lint` + pytest зелёные; коммиты подшагами + тег `stage/4`
 
 ### [ ] Этап 5. Query pipeline (LangGraph)
