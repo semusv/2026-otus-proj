@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,10 +19,10 @@ from sqlalchemy.orm import joinedload
 
 from app.api.deps import audit_context, get_current_user
 from app.config import Settings
-from app.core.errors import ForbiddenError, IngestAlreadyRunningError
+from app.core.errors import ForbiddenError, IngestAlreadyRunningError, UserNotFoundError
 from app.core.security import resolve_clearances
 from app.db.base import get_session
-from app.db.models import AuditLog, ChatMessage, ChatSession, RoleName, User
+from app.db.models import AuditLog, ChatMessage, ChatSession, Role, RoleName, User
 from app.db.users import create_user
 from app.ingestion.pipeline import run_ingestion
 from app.schemas.admin import (
@@ -33,6 +34,7 @@ from app.schemas.admin import (
     StorageStatsResponse,
     UserCreate,
     UserOut,
+    UserRoleUpdate,
     UsersListResponse,
 )
 
@@ -209,3 +211,49 @@ async def add_user(
     await session.commit()
     await session.refresh(created, attribute_names=["role"])
     return _user_out(created)
+
+
+@router.patch(
+    "/users/{user_id}",
+    response_model=UserOut,
+    summary="Сменить роль пользователя (метки доступа пересчитаются из роли)",
+    responses={
+        403: {"description": "Не admin или попытка сменить собственную роль"},
+        404: {"description": "Пользователь не найден"},
+    },
+)
+async def change_user_role(
+    user_id: uuid.UUID,
+    payload: UserRoleUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserOut:
+    """Права применяются сразу: clearances резолвятся из БД на каждом запросе,
+    повторный вход не требуется. Смена собственной роли запрещена (защита от
+    случайной потери последнего админа)."""
+    _require_admin(user)
+    if user.id == user_id:
+        raise ForbiddenError("Нельзя изменить собственную роль")
+
+    target = (
+        await session.execute(select(User).options(joinedload(User.role)).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if target is None:
+        raise UserNotFoundError()
+
+    new_role = (
+        await session.execute(select(Role).where(Role.name == RoleName(payload.role)))
+    ).scalar_one()
+    old_role = target.role.name.value
+    target.role_id = new_role.id
+    session.add(
+        AuditLog(
+            action="admin.user_role_changed",
+            user_id=user.id,
+            detail={"target": target.username, "old_role": old_role, "new_role": payload.role},
+            **audit_context(),
+        )
+    )
+    await session.commit()
+    await session.refresh(target, attribute_names=["role"])
+    return _user_out(target)

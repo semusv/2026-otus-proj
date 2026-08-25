@@ -147,3 +147,61 @@ async def test_registered_viewer_cannot_reach_admin(itg_client) -> None:
         )
     ).status_code == 403
     assert (await client.get("/admin/stats", headers=headers)).status_code == 403
+
+
+@pytest.mark.integration
+async def test_admin_changes_role_and_access_expands(itg_client) -> None:
+    """Смена роли админом: метки доступа пересчитываются, перелогин не нужен."""
+    client, _app = itg_client
+    admin_headers = await _login(client, "admin")
+
+    name = f"qa_promo_{uuid.uuid4().hex[:8]}"
+    created = await client.post(
+        "/admin/users",
+        headers=admin_headers,
+        json={"username": name, "password": "qapromo123", "role": "viewer"},
+    )
+    user_id = created.json()["user_id"]
+
+    # токен пользователя, выпущенный ДО смены роли
+    old_login = await client.post("/auth/login", json={"username": name, "password": "qapromo123"})
+    old_headers = {"Authorization": f"Bearer {old_login.json()['access_token']}"}
+    assert (await client.get("/auth/me", headers=old_headers)).json()["clearances"] == ["PUBLIC"]
+
+    patched = await client.patch(
+        f"/admin/users/{user_id}", headers=admin_headers, json={"role": "analyst"}
+    )
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["role"] == "analyst"
+    assert body["clearances"] == ["INTERNAL", "PUBLIC"]
+
+    # тот же access-токен: права уже расширены (clearances резолвятся из БД)
+    profile = (await client.get("/auth/me", headers=old_headers)).json()
+    assert profile["role"] == "analyst"
+    assert profile["clearances"] == ["INTERNAL", "PUBLIC"]
+
+    # понижение обратно работает так же
+    demoted = await client.patch(
+        f"/admin/users/{user_id}", headers=admin_headers, json={"role": "viewer"}
+    )
+    assert demoted.json()["clearances"] == ["PUBLIC"]
+
+    # несуществующий пользователь → 404
+    not_found = await client.patch(
+        f"/admin/users/{uuid.UUID(int=0)}", headers=admin_headers, json={"role": "viewer"}
+    )
+    assert not_found.status_code == 404
+
+    # смена собственной роли запрещена
+    admin_me = await client.get("/auth/me", headers=admin_headers)
+    self_patch = await client.patch(
+        f"/admin/users/{admin_me.json()['user_id']}", headers=admin_headers, json={"role": "viewer"}
+    )
+    assert self_patch.status_code == 403
+
+    # не-админ не может менять роли
+    forbidden = await client.patch(
+        f"/admin/users/{user_id}", headers=old_headers, json={"role": "admin"}
+    )
+    assert forbidden.status_code == 403

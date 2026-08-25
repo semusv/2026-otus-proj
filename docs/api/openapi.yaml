@@ -208,6 +208,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /admin/users/{user_id}:
+    patch:
+      tags:
+      - admin
+      summary: Сменить роль пользователя (метки доступа пересчитаются из роли)
+      description: 'Права применяются сразу: clearances резолвятся из БД на каждом запросе,
+
+        повторный вход не требуется. Смена собственной роли запрещена (защита от
+
+        случайной потери последнего админа).'
+      operationId: change_user_role_admin_users__user_id__patch
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRoleUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOut'
+        '403':
+          description: Не admin или попытка сменить собственную роль
+        '404':
+          description: Пользователь не найден
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/chat:
     post:
       tags:
@@ -579,6 +621,22 @@ components:
       - created_at
       title: UserOut
       description: Учётная запись без секретов.
+    UserRoleUpdate:
+      properties:
+        role:
+          type: string
+          enum:
+          - viewer
+          - analyst
+          - admin
+          title: Role
+      type: object
+      required:
+      - role
+      title: UserRoleUpdate
+      description: Смена роли пользователя админом; метки доступа пересчитаются из роли.
+      examples:
+      - role: analyst
     UsersListResponse:
       properties:
         users:

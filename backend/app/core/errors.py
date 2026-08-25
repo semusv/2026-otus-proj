@@ -56,6 +56,12 @@ class UserExistsError(AppError):
     message = "Пользователь с таким именем уже существует"
 
 
+class UserNotFoundError(AppError):
+    code = "user_not_found"
+    status_code = 404
+    message = "Пользователь не найден"
+
+
 def _error_body(
     code: str,
     message: str,

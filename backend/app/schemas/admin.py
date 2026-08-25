@@ -87,3 +87,11 @@ class UserOut(BaseModel):
 
 class UsersListResponse(BaseModel):
     users: list[UserOut]
+
+
+class UserRoleUpdate(BaseModel):
+    """Смена роли пользователя админом; метки доступа пересчитаются из роли."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [{"role": "analyst"}]})
+
+    role: RoleLiteral
