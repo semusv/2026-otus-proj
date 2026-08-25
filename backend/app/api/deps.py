@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.config import Settings
-from app.core.context import get_request_id, get_trace_id
+from app.core.context import get_request_id, get_trace_id, set_user_id
 from app.core.errors import TokenInvalidError
 from app.core.security import decode_token
 from app.db.models import AuthSession, User
@@ -40,6 +40,7 @@ async def get_current_user(request: Request) -> User:
         if user is None or not user.is_active:
             raise TokenInvalidError()
         _ = user.role.name  # материализуем связь до закрытия сессии
+        set_user_id(str(user.id))  # этап 7: user_id в каждой лог-строке запроса
         return user
 
 

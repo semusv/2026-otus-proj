@@ -159,6 +159,16 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
     async def _emit(stage: str, **data: object) -> None:
         await events.emit("status", {"stage": stage, **data})
 
+    async def _audit_guardrail_event(kind: str, detail: dict[str, Any]) -> None:
+        """Этап 7: значимые результаты guardrails дублируются в audit_log (best-effort)."""
+        callback = runtime.extra.get("audit_guardrail")
+        if callback is None:
+            return
+        try:
+            await callback({"kind": kind, **detail})
+        except Exception:
+            logger.warning("Не удалось записать guardrail-событие в аудит", exc_info=True)
+
     @traced_node("guardrail_in")
     async def guardrail_in(state: AgentState) -> dict[str, Any]:
         await _emit("guardrails")
@@ -179,6 +189,19 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
                 issues = ["llm_injection_classifier"]
                 notes.append(f"injection_reason:{reason}"[:120])
 
+        notable = [
+            n for n in notes
+            if n.startswith(("query_sanitized", "query_truncated", "injection_reason"))
+        ]
+        if notable or issues:
+            await _audit_guardrail_event(
+                "input",
+                {
+                    "session_id": state.get("session_id"),
+                    "events": [*notable, *issues][:8],
+                },
+            )
+
         return {
             "question": cleaned,
             "notes": notes,
@@ -190,6 +213,11 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
 
     @traced_node("refuse")
     async def refuse(state: AgentState) -> dict[str, Any]:
+        await _audit_guardrail_event(
+            "refuse",
+            {"session_id": state.get("session_id"),
+             "issues": list(state.get("injection_issues", []))},
+        )
         return {
             "answer": refusal_answer(),
             "citations": [],
@@ -406,6 +434,15 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
             note in {"max_replans_reached", "evaluate_unavailable"} for note in notes
         ):
             status = "degraded"
+
+        out_notable = [
+            n for n in notes if n.startswith(("dropped_citations", "output_violation"))
+        ]
+        if out_notable:
+            await _audit_guardrail_event(
+                "output",
+                {"session_id": state.get("session_id"), "events": out_notable[:8]},
+            )
 
         return {
             "answer": checked.clean_answer,

@@ -10,7 +10,11 @@ from qdrant_client import AsyncQdrantClient
 from app.agents.graph import AgentRuntime
 from app.agents.memory import ChatMemory
 from app.config import Settings
-from app.core.audit import ACTION_ACL_VIOLATION, record_denial
+from app.core.audit import (
+    ACTION_ACL_VIOLATION,
+    ACTION_GUARDRAIL_EVENT,
+    record_denial,
+)
 from app.db.base import Database
 from app.ingestion.embeddings import Embedder
 from app.llm.client import LLMClient, LLMConfig
@@ -62,12 +66,21 @@ def build_chat_runtime(settings: Settings, db: Database) -> tuple[AgentRuntime,
             db.session_factory, action=ACTION_ACL_VIOLATION, detail=detail
         )
 
+    async def _audit_guardrail(detail: dict[str, object]) -> bool:
+        """Этап 7: результаты guardrails (sanitized/truncated/blocked/dropped) в audit_log."""
+        return await record_denial(
+            db.session_factory, action=ACTION_GUARDRAIL_EVENT, detail=detail
+        )
+
     runtime = AgentRuntime(
         settings=settings,
         llm=llm,
         tools=tools,
         reranker=reranker,
         memory=memory,
-        extra={"audit_acl_violation": _audit_acl_violation},
+        extra={
+            "audit_acl_violation": _audit_acl_violation,
+            "audit_guardrail": _audit_guardrail,
+        },
     )
     return runtime, graph_retriever, qdrant_client

@@ -17,6 +17,7 @@ logger = logging.getLogger("app.audit")
 
 ACTION_ACCESS_DENIED = "access_denied"
 ACTION_ACL_VIOLATION = "acl_violation"
+ACTION_GUARDRAIL_EVENT = "guardrail_event"
 
 AuditCallback = Callable[[dict[str, Any]], Awaitable[bool]]
 
@@ -47,4 +48,10 @@ async def record_denial(
         return False
 
 
-__all__ = ["ACTION_ACCESS_DENIED", "ACTION_ACL_VIOLATION", "AuditCallback", "record_denial"]
+__all__ = [
+    "ACTION_ACCESS_DENIED",
+    "ACTION_ACL_VIOLATION",
+    "ACTION_GUARDRAIL_EVENT",
+    "AuditCallback",
+    "record_denial",
+]

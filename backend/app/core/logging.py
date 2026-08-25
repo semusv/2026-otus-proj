@@ -6,7 +6,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from app.core.context import get_request_id, get_trace_id
+from app.core.context import get_request_id, get_trace_id, get_user_id
 
 
 class ContextFilter(logging.Filter):
@@ -15,6 +15,7 @@ class ContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.trace_id = get_trace_id()
         record.request_id = get_request_id()
+        record.user_id = get_user_id()
         return True
 
 
@@ -29,6 +30,7 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "trace_id": getattr(record, "trace_id", "-"),
             "request_id": getattr(record, "request_id", "-"),
+            "user_id": getattr(record, "user_id", "-"),
         }
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
