@@ -48,3 +48,5 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+# load test / newman artifacts (этап 9)
+scripts/load_test/results/
