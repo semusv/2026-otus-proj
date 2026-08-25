@@ -71,7 +71,6 @@ async def test_logs_contain_user_id_after_auth(itg_client) -> None:
     _ = app
     # НЕ caplog и НЕ root: create_app вызывает root.handlers.clear();
     # вешаем хендлер на логгер источника - он срабатывает до propagation.
-    remove, grabbed, _unused = None, [], None  # type: ignore[var-annotated]
     access_records: list[logging.LogRecord] = []
 
     class _Grab(logging.Handler):
