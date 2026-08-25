@@ -89,7 +89,10 @@ async def run_ingestion(
     )
 
     try:
-        await qdrant.ensure_collection(embedder.dim)
+        # первая загрузка модели (torch + веса с диска/HF) занимает десятки секунд -
+        # только в потоке, иначе блокируем event loop и API перестаёт отвечать
+        dim = await asyncio.to_thread(lambda: embedder.dim)
+        await qdrant.ensure_collection(dim)
         await neo4j.ensure_schema()
 
         extractor = ConceptExtractor(
