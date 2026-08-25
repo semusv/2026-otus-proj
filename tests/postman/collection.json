@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "b1e6a7c2-0003-4000-8000-graphrag00001",
-    "name": "GraphRAG Platform - Stage 3 (auth)",
-    "description": "Auth-сценарии этапа 3. Импортировано из docs/api/openapi.yaml.\nЗапуск: newman run tests/postman/collection.json -e tests/postman/env.local.json",
+    "name": "GraphRAG Platform - Stage 4 (auth + ingest)",
+    "description": "Auth (этап 3) и admin/ingest (этап 4) сценарии. Импортировано из docs/api/openapi.yaml.\nЗапуск: newman run tests/postman/collection.json -e tests/postman/env.local.json",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -129,6 +129,97 @@
           "request": {
             "method": "GET",
             "url": "{{baseUrl}}/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "admin",
+      "item": [
+        {
+          "name": "Ingest status (до прогона)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('state валиден', () => pm.expect(['idle','running','done','error']).to.include(body.state));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/admin/ingest/status"
+          }
+        },
+        {
+          "name": "Ingest start -> 202",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 или 409 (уже идёт)', () => pm.expect([202, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 202) { pm.test('state=started', () => pm.expect(pm.response.json().state).to.eql('started')); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/admin/ingest"
+          }
+        },
+        {
+          "name": "Ingest без токена -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/ingest/status"
+          }
+        },
+        {
+          "name": "Viewer не может запустить ingest -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK при логине viewer', () => pm.response.to.have.status(200));",
+                  "const token = pm.response.json().access_token;",
+                  "pm.sendRequest({ url: pm.collectionVariables.get('baseUrl') + '/admin/ingest/status', method: 'GET', header: { Authorization: 'Bearer ' + token } }, (err, resp) => {",
+                  "  pm.expect(resp.code).to.eql(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"viewer\",\n  \"password\": \"viewer123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
           }
         }
       ]

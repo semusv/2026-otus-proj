@@ -3,7 +3,7 @@ info:
   title: GraphRAG Platform API
   description: Платформа мультимодального анализа корпоративных знаний (GraphRAG, закрытый контур). Контракт экспортируется
     в docs/api/openapi.yaml.
-  version: 0.3.0
+  version: 0.4.0
 paths:
   /health:
     get:
@@ -84,6 +84,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /admin/ingest:
+    post:
+      tags:
+      - admin
+      summary: Запустить ingestion корпуса (background task)
+      operationId: start_ingest_admin_ingest_post
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestStartResponse'
+        '403':
+          description: Не admin
+        '409':
+          description: Прогон уже идёт
+  /admin/ingest/status:
+    get:
+      tags:
+      - admin
+      summary: Статус последнего/текущего прогона ingestion
+      operationId: ingest_status_admin_ingest_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestStatusResponse'
+        '403':
+          description: Не admin
 components:
   schemas:
     ErrorResponse:
@@ -117,6 +149,56 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    IngestStartResponse:
+      properties:
+        state:
+          type: string
+          const: started
+          title: State
+          default: started
+        message:
+          type: string
+          title: Message
+          default: Прогон ingestion запущен
+      type: object
+      title: IngestStartResponse
+    IngestStatusResponse:
+      properties:
+        state:
+          type: string
+          enum:
+          - idle
+          - running
+          - done
+          - error
+          title: State
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        stats:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Stats
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - state
+      title: IngestStatusResponse
     LoginRequest:
       properties:
         username:
@@ -231,3 +313,5 @@ tags:
   description: Здоровье сервиса и метрики
 - name: auth
   description: Аутентификация и профиль пользователя
+- name: admin
+  description: Управление ingestion корпуса (роль admin)
