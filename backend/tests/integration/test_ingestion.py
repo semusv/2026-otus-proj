@@ -29,7 +29,7 @@ TEST_COLLECTION = "chunks_test"
 REF_ACT_XML = """<?xml version="1.0" ?><act><body><textIPS>
  ФЕДЕРАЛЬНЫЙ ЗАКОН
  О внесении изменений в Гражданский процессуальный кодекс
- Статья 1. Внести в &lt;ref nd=&quot;102010098&quot;&gt;Гражданский процессуальный кодекс РСФСР&lt;/ref&gt; изменения.
+ Статья 1. Внести в &lt;ref nd=&quot;900000101&quot;&gt;Гражданский процессуальный кодекс РСФСР&lt;/ref&gt; изменения.
  Статья 2. Настоящий закон вступает в силу со дня официального опубликования.
 </textIPS></body><meta><identification><pravogovruNd val="999000001"/><issuedByIPS val="Федеральный закон"/><doc_typeIPS val="Федеральный закон"/><doc_author_normal_formIPS val="Российская Федерация"/><docdateIPS val="15.03.2001"/><docNumberIPS val="22-ФЗ"/><headingIPS val="О внесении изменений в ГПК РСФСР"/><statusIPS val="Действует без изменений"/></identification><keywords><keywordsByIPS val="ГРАЖДАНСКИЙ ПРОЦЕСС"/></keywords><reference><classifierByIPS/></reference></meta></act>"""
 
@@ -75,7 +75,7 @@ class StubEmbedder:
         return vectors
 
 
-TEST_ACT_IDS = ("102010098", "102010238", "999000001")
+TEST_ACT_IDS = ("900000101", "900000102", "999000001")
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ class TestIngestionPipeline:
                     "RETURN collect(b.id) AS targets"
                 )
             ).data()
-        assert rows[0]["targets"] == ["102010098"]
+        assert rows[0]["targets"] == ["900000101"]
 
     async def test_rerun_is_idempotent(
         self, itg_settings: Settings, corpus_dir: Path, qdrant: QdrantWriter, neo4j: Neo4jWriter

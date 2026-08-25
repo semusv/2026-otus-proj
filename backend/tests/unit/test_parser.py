@@ -1,4 +1,4 @@
-"""Unit-тесты парсера RusLawOD на фикстурах по образцу реального корпуса."""
+﻿"""Unit-тесты парсера RusLawOD на фикстурах по образцу реального корпуса."""
 
 from pathlib import Path
 
@@ -21,7 +21,7 @@ def act_full() -> ParsedAct:
 
 class TestParseFull:
     def test_identification(self, act_full: ParsedAct) -> None:
-        assert act_full.id == "102010098"
+        assert act_full.id == "900000101"
         assert act_full.title == "Об утверждении Гражданского процессуального кодекса РСФСР"
         assert act_full.doc_number == "б/н"
         assert act_full.date == "1964-06-11"

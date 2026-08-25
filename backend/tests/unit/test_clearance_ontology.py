@@ -14,15 +14,15 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "ruslawod"
 
 class TestClearance:
     def test_deterministic_across_calls(self) -> None:
-        first = resolve_clearance("102010098", internal_percent=20, secret_percent=10)
-        second = resolve_clearance("102010098", internal_percent=20, secret_percent=10)
+        first = resolve_clearance("900000101", internal_percent=20, secret_percent=10)
+        second = resolve_clearance("900000101", internal_percent=20, secret_percent=10)
         assert first == second
 
     def test_known_distribution(self) -> None:
         # md5-распределение фиксировано: проверяем конкретные значения для стабильности схемы
         labels = {
             act_id: resolve_clearance(act_id, internal_percent=20, secret_percent=10)
-            for act_id in ("102010098", "102010099", "102010100")
+            for act_id in ("900000101", "102010099", "102010100")
         }
         assert set(labels.values()) <= {"PUBLIC", "INTERNAL", "SECRET"}
 
@@ -63,7 +63,7 @@ class TestOntology:
 
     def test_act_properties_complete(self, act: ParsedAct) -> None:
         props = act_properties(act, "INTERNAL")
-        assert props["id"] == "102010098"
+        assert props["id"] == "900000101"
         assert props["clearance"] == "INTERNAL"
         assert props["date"] == "1964-06-11"
         assert props["status"] == "Действует с изменениями"
@@ -71,7 +71,7 @@ class TestOntology:
 
     def test_references_filtered_to_corpus(self, act: ParsedAct) -> None:
         # в фикстуре ссылка на 102010101; считаем корпусом только её саму + соседа
-        refs = filter_references(act, {"102010098", "102010101"})
+        refs = filter_references(act, {"900000101", "102010101"})
         assert refs == ("102010101",)
 
     def test_references_dropped_when_target_absent(self, act: ParsedAct) -> None:
