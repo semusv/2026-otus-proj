@@ -28,20 +28,20 @@ class TestParseFull:
         assert act_full.authority == "РСФСР"
         assert act_full.doc_type == "Закон"
 
-    def test_status_normalized_from_latin_c(self, act_full: object) -> None:
+    def test_status_normalized_from_latin_c(self, act_full: ParsedAct) -> None:
         assert act_full.status_raw == "Действует c изменениями"  # латинская «c»
         assert act_full.status == "Действует с изменениями"
 
-    def test_keywords_csv(self, act_full: object) -> None:
+    def test_keywords_csv(self, act_full: ParsedAct) -> None:
         assert act_full.keywords == ("ГРАЖДАНСКИЙ ПРОЦЕСС", "КОДЕКС", "УТВЕРЖДЕНИЕ")
 
-    def test_classifier_pairs_to_topics(self, act_full: object) -> None:
+    def test_classifier_pairs_to_topics(self, act_full: ParsedAct) -> None:
         assert act_full.topics == ("Гражданский процесс", "Законодательные органы")
 
-    def test_refs_extracted_unique_in_order(self, act_full: object) -> None:
+    def test_refs_extracted_unique_in_order(self, act_full: ParsedAct) -> None:
         assert act_full.ref_ids == ("102010101",)
 
-    def test_text_keeps_literal_ref_tags_for_cleaner(self, act_full: object) -> None:
+    def test_text_keeps_literal_ref_tags_for_cleaner(self, act_full: ParsedAct) -> None:
         assert '<ref nd="102010101">' in act_full.text
         assert "Гражданский процессуальный кодекс РСФСР" in act_full.text
 
