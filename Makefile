@@ -3,8 +3,9 @@
 # Все python-команды выполняются из backend/ (uv --project), чтобы подхватить .venv и pyproject.
 
 BACKEND_DIR := backend
+FRONTEND_DIR := frontend
 
-.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install
+.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install frontend-install frontend-lint frontend-test frontend-build openapi-types
 
 help:
 	@echo "lint              - ruff check + mypy (gate всех этапов)"
@@ -17,6 +18,11 @@ help:
 	@echo "test-judge        - LLM-as-a-Judge промпт-тесты (нужен запущенный LM Studio)"
 	@echo "seed-users        - создать роли и 3 пользователей (viewer/analyst/admin) в PG"
 	@echo "openapi-export    - экспортировать OpenAPI-контракт в docs/api/openapi.yaml"
+	@echo "frontend-install  - npm ci для frontend"
+	@echo "frontend-lint     - eslint + tsc --noEmit для frontend"
+	@echo "frontend-test     - vitest smoke для frontend"
+	@echo "frontend-build    - production build SPA"
+	@echo "openapi-types     - регенерация типов фронта из docs/api/openapi.yaml"
 
 lint:
 	cd $(BACKEND_DIR) && uv run ruff check .
@@ -55,3 +61,19 @@ seed-users:
 
 openapi-export:
 	cd $(BACKEND_DIR) && uv run python ../scripts/export_openapi.py
+
+frontend-install:
+	cd $(FRONTEND_DIR) && npm ci
+
+frontend-lint:
+	cd $(FRONTEND_DIR) && npm run lint
+	cd $(FRONTEND_DIR) && npm run typecheck
+
+frontend-test:
+	cd $(FRONTEND_DIR) && npm test
+
+frontend-build:
+	cd $(FRONTEND_DIR) && npm run build
+
+openapi-types:
+	cd $(FRONTEND_DIR) && npm run gen:api
