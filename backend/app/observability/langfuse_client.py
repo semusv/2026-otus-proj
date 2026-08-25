@@ -1,17 +1,21 @@
 """Интеграция Langfuse (этап 7, ADR-008): промпты/комплиты генераций.
 
 Принципы:
-- НИЗКОуровневый API SDK (trace/generation), а не @observe - чтобы не конфликтовать
-  с собственным TracerProvider OTel (Jaeger) и не порождать второй глобальный провайдер;
-- Единая трасса: id трейса Langfuse = X-Trace-Id запроса (contextvar), session тоже он -
-  в UI Langfuse ходы группируются по сессии диалога и склеиваются с Jaeger по значению;
+- v4 SDK: generation через ``start_as_current_observation(as_type="generation")``,
+  сессия/пользователь - через ``propagate_attributes`` (см. docs/observability/features/sessions);
+  НЕ используем собственный TracerProvider SDK - его процессор добавляется к нашему,
+  Jaeger остаётся единственным владельцем глобального провайдера;
+- Единая трасса: OTel trace_id == X-Trace-Id (middleware этапа 7), поэтому трейс в
+  Langfuse склеивается с Jaeger по значению; session_id = X-Trace-Id запроса;
 - Graceful: недоступность Langfuse НИКОГДА не ломает чат - все вызовы обёрнуты,
   клиент с таймаутом; при APP_LANGFUSE_ENABLED=false или пустых ключах - no-op;
-- Flush на shutdown - best-effort в отдельном потоке.
+- Flush/shutdown - best-effort в отдельном потоке.
 """
 
 import asyncio
 import logging
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from typing import Any
 
 from app.config import Settings
@@ -59,58 +63,82 @@ def shutdown_langfuse() -> None:
     if client is None:
         return
     try:
-        asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         client.flush()
         return
+    task = loop.create_task(asyncio.to_thread(client.shutdown))
+    _ = task  # fire-and-forget: приложение завершается после yield
 
-    async def _flush() -> None:
-        await asyncio.to_thread(client.shutdown)
 
+@contextmanager
+def llm_generation(
+    *, name: str, model: str, messages: list[dict[str, str]]
+) -> Iterator[Any | None]:
+    """Generation-контекст текущего LLM-вызова; yields handle или None (disabled).
+
+    session_id/user_id берутся из contextvar'ов запроса; любые ошибки Langfuse
+    глушатся с debug-логом.
+    """
+    handle: Any | None = None
+    stack: ExitStack | None = None
+    client = get_langfuse()
+    if client is not None:
+        try:
+            from langfuse import propagate_attributes
+
+            from app.core.context import get_trace_id, get_user_id
+
+            trace_id = get_trace_id()
+            user_id = get_user_id()
+            stack = ExitStack()
+            stack.enter_context(
+                propagate_attributes(
+                    session_id=trace_id if trace_id != "-" else None,
+                    user_id=user_id if user_id != "-" else None,
+                )
+            )
+            handle = stack.enter_context(
+                client.start_as_current_observation(
+                    as_type="generation",
+                    name=name,
+                    model=model,
+                    input=messages,
+                )
+            )
+        except Exception:
+            logger.debug("llm_generation: контекст Langfuse не создан", exc_info=True)
+            if stack is not None:
+                stack.close()
+            handle = None
     try:
-        asyncio.get_running_loop().create_task(_flush())
-    except Exception:
-        logger.debug("Langfuse shutdown-flush пропущен", exc_info=True)
+        yield handle
+    finally:
+        if stack is not None:
+            try:
+                stack.close()
+            except Exception:
+                logger.debug("llm_generation: закрытие контекста пропущено", exc_info=True)
 
 
-def start_generation(*, name: str, model: str, messages: list[dict[str, str]]) -> Any | None:
-    """Открывает generation в трейсе текущего запроса (id=session=X-Trace-Id)."""
-    client = _CLIENT
-    if client is None:
-        return None
-    try:
-        from app.core.context import get_trace_id, get_user_id
-
-        trace_id = get_trace_id()
-        lf_trace = client.trace(
-            id=trace_id,
-            session_id=trace_id,
-            user_id=None if get_user_id() == "-" else get_user_id(),
-            name="chat",
-        )
-        return lf_trace.generation(name=name, model=model, input=messages)
-    except Exception:
-        logger.debug("start_generation Langfuse пропущен", exc_info=True)
-        return None
-
-
-def end_generation(handle: Any | None, *, output: str, error: str | None = None) -> None:
-    """Закрывает generation (best-effort)."""
+def finish_generation(handle: Any | None, *, output: str, error: str | None = None) -> None:
+    """Записывает результат generation (best-effort)."""
     if handle is None:
         return
     try:
         if error is not None:
-            handle.end(output={"error": error}, level="ERROR")
+            handle.update(output={"error": error}, level="ERROR",
+                          status_message=error[:200])
         else:
-            handle.end(output=output)
+            handle.update(output=output)
     except Exception:
-        logger.debug("end_generation Langfuse пропущен", exc_info=True)
+        logger.debug("finish_generation Langfuse пропущен", exc_info=True)
 
 
 __all__ = [
-    "end_generation",
+    "finish_generation",
     "get_langfuse",
+    "llm_generation",
     "setup_langfuse",
     "shutdown_langfuse",
-    "start_generation",
 ]

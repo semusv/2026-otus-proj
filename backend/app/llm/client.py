@@ -1,4 +1,4 @@
-"""Асинхронный клиент LLM (OpenAI-совместимый API).
+﻿"""Асинхронный клиент LLM (OpenAI-совместимый API).
 
 Работает с LM Studio (dev) и vLLM (целевой движок) без изменений кода -
 переключение только через APP_LLM_BASE_URL/APP_LLM_MODEL (ADR-001).
@@ -7,14 +7,13 @@
 
 import json
 import re
-import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.observability.langfuse_client import end_generation, start_generation
+from app.observability.langfuse_client import finish_generation, llm_generation
 
 
 @dataclass(frozen=True)
@@ -47,23 +46,21 @@ class LLMClient:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        handle = start_generation(name="llm.complete", model=self.model, messages=messages)
-        started = time.perf_counter()
-        try:
-            response = await self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            content = response.choices[0].message.content or ""
-            result = content.strip()
-        except Exception as exc:
-            end_generation(handle, output="", error=str(exc)[:300])
-            raise
-        _ = time.perf_counter() - started
-        end_generation(handle, output=result)
-        return result
+        with llm_generation(name="llm.complete", model=self.model,
+                                  messages=messages) as gen:
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,  # type: ignore[arg-type]
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                result = (response.choices[0].message.content or "").strip()
+            except Exception as exc:
+                finish_generation(gen, output="", error=str(exc)[:300])
+                raise
+            finish_generation(gen, output=result)
+            return result
 
     async def complete_json(self, system: str, user: str, **kwargs: float) -> object | None:
         """complete + извлечение JSON из ответа (модели любят добавлять prose/```json)."""
@@ -78,26 +75,28 @@ class LLMClient:
         max_tokens: int = 1024,
     ) -> AsyncIterator[str]:
         """Стриминг токенов генерации (SSE-эндпоинт чата, этап 5)."""
-        handle = start_generation(name="llm.stream", model=self.model, messages=messages)
-        accumulated: list[str] = []
-        try:
-            response: Any = await self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-            )
-            async for chunk in response:
-                if chunk.choices:
-                    delta = chunk.choices[0].delta.content
-                    if delta:
-                        accumulated.append(delta)
-                        yield delta
-        except Exception as exc:
-            end_generation(handle, output="".join(accumulated), error=str(exc)[:300])
-            raise
-        end_generation(handle, output="".join(accumulated))
+        with llm_generation(name="llm.stream", model=self.model,
+                                  messages=messages) as gen:
+            accumulated: list[str] = []
+            try:
+                response: Any = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,  # type: ignore[arg-type]
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                async for chunk in response:
+                    if chunk.choices:
+                        delta = chunk.choices[0].delta.content
+                        if delta:
+                            accumulated.append(delta)
+                            yield delta
+            except Exception as exc:
+                finish_generation(gen, output="".join(accumulated),
+                                  error=str(exc)[:300])
+                raise
+            finish_generation(gen, output="".join(accumulated))
 
 
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)

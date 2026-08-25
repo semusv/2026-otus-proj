@@ -6,6 +6,10 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    # Порт для экспорта спанов ИЗ хост-процессов (интеграционные тесты этапа 7);
+    # в контейнере backend ходит по внутреннему имени otel-collector:4318
+    ports:
+      - "127.0.0.1:${APP_OTEL_HTTP_PORT:-4318}:4318"
     networks:
       - data
 
