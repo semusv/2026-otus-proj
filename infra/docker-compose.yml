@@ -26,7 +26,7 @@ services:
       context: ../backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    image: graphrag/backend:stage6
+    image: graphrag/backend:stage7
     container_name: graphrag-backend
     restart: unless-stopped
     environment:
@@ -50,6 +50,11 @@ services:
       APP_GUARDRAIL_USE_LLM: ${APP_GUARDRAIL_USE_LLM:-true}
       APP_TRACING_ENABLED: ${APP_TRACING_ENABLED:-true}
       APP_OTEL_EXPORTER_ENDPOINT: ${APP_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      # Langfuse (этап 7): опционально; недоступность не ломает чат
+      APP_LANGFUSE_ENABLED: ${APP_LANGFUSE_ENABLED:-false}
+      APP_LANGFUSE_URL: ${APP_LANGFUSE_URL:-}
+      APP_LANGFUSE_PUBLIC_KEY: ${APP_LANGFUSE_PUBLIC_KEY:-}
+      APP_LANGFUSE_SECRET_KEY: ${APP_LANGFUSE_SECRET_KEY:-}
       HF_HOME: /hf-cache/huggingface
     volumes:
       - ../corpus_test:/data/corpus:ro

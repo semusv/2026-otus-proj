@@ -65,8 +65,9 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      # JSON-дашборды (этап 7): провижинятся провайдером из grafana/provisioning/dashboards/
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # JSON-дашборды (этап 7): путь ВНЕ /var/lib/grafana - иначе вложенный маунт
+      # конфликтует с томом grafana_data (Grafana падает на provisionинге)
+      - ./grafana/dashboards:/dashboards:ro
       - grafana_data:/var/lib/grafana
     networks:
       - edge
