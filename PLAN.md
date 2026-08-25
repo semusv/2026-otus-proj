@@ -236,7 +236,7 @@ CLI-команда + `POST /admin/ingest` (background task). Разметка ч
   полный цикл с Concepts — CLI `python -m app.ingestion --concepts`. Для этапа 8 (Admin-кнопка)
   решить: включать ли concepts в compose-окружении.
 
-### [ ] Этап 5. Query pipeline (LangGraph)
+### [x] Этап 5. Query pipeline (LangGraph)
 **Deliverables:** граф LangGraph (state machine, НЕ линейная цепочка):
 - Узлы: `guardrail_in → planner (выбор инструментов) → tools [retrieve_vec (Qdrant+ACL filter) | expand_graph (Neo4j Cypher 1–2 hop)] → fusion → rerank (bge-reranker CPU) → generate (vLLM stream) → evaluate → guardrail_out (проверка цитат)`
 - **Agent Loop:** после generate узел `evaluate` проверяет достаточность контекста; при нехватке — возврат к planner с уточнённым запросом (максимум 2 итерации)
@@ -261,40 +261,57 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 Чек-лист выполнения:
 
 **A. Зависимости и конфиг**
-- [ ] deps: langgraph (пин версии), opentelemetry-api/sdk + OTLP-exporter; `.env.example` дополнен
-- [ ] config: APP_RAG_VECTOR_TOP_K, APP_RAG_FINAL_TOP_N, APP_RAG_GRAPH_HOPS (1–2),
+- [x] deps: langgraph (пин версии), opentelemetry-api/sdk + OTLP-exporter; `.env.example` дополнен
+- [x] config: APP_RAG_VECTOR_TOP_K, APP_RAG_FINAL_TOP_N, APP_RAG_GRAPH_HOPS (1–2),
       APP_AGENT_MAX_ITERATIONS (2), APP_GENERATE_TEMPERATURE/MAX_TOKENS,
       APP_RERANK_MODEL/APP_RERANK_DEVICE, APP_CHAT_HISTORY_LIMIT, APP_GUARDRAIL_*, APP_TRACING_ENABLED
 
 **B. Инфраструктурные кирпичи**
-- [ ] `llm/client.py`: `stream(system, user, ...) -> AsyncIterator[str]`
-- [ ] миграция `0002_chat_sessions_messages`: chat_sessions + chat_messages(role, content, sources JSONB, trace_id)
-- [ ] `rag/retrievers.py`: retrieve_vec (Qdrant filter clearance ∈ allowed), expand_graph (Cypher WHERE clearance, 1–2 hop)
-- [ ] `rag/fusion.py` (RRF), `rag/reranker.py` (bge-reranker-v2-m3, lazy CPU, asyncio.to_thread),
+- [x] `llm/client.py`: `stream(system, user, ...) -> AsyncIterator[str]`
+- [x] миграция `0002_chat_sessions_messages`: chat_sessions + chat_messages(role, content, sources JSONB, trace_id)
+- [x] `rag/retrievers.py`: retrieve_vec (Qdrant filter clearance ∈ allowed), expand_graph (Cypher WHERE clearance, 1–2 hop)
+- [x] `rag/fusion.py` (RRF), `rag/reranker.py` (bge-reranker-v2-m3, lazy CPU, asyncio.to_thread),
       singleton Embedder для query-вектора (to_thread)
 
 **C. Агент (Memory / Planner / Tools Interface)**
-- [ ] `rag/tools.py` — Tools Interface (реестр инструментов, типизированные результаты)
-- [ ] `agents/memory.py` — история сессии из PG ↔ состояние графа (load_history / append_turn)
-- [ ] `agents/planner.py` — правила + LLM rewrite/re-plan
-- [ ] `agents/guardrails.py` — sanitize_query + in (эвристики + LLM verdict) + out (цитаты ⊆ контекста, опц. LLM)
-- [ ] `agents/graph.py` — AgentState(TypedDict); guardrail_in → planner → tools(vec|graph|both) → fusion →
+- [x] `rag/tools.py` — Tools Interface (реестр инструментов, типизированные результаты)
+- [x] `agents/memory.py` — история сессии из PG ↔ состояние графа (load_history / append_turn)
+- [x] `agents/planner.py` — правила + LLM rewrite/re-plan
+- [x] `agents/guardrails.py` — sanitize_query + in (эвристики + LLM verdict) + out (цитаты ⊆ контекста, опц. LLM)
+- [x] `agents/graph.py` — AgentState(TypedDict); guardrail_in → planner → tools(vec|graph|both) → fusion →
       rerank → generate(stream→накопление) → evaluate → (re-plan ≤2 | guardrail_out) → END;
       компиляция в lifespan на app.state; спан на каждый узел
 
 **D. API**
-- [ ] `POST /api/chat` (JWT): SSE события status/token/citations/done/error, статусы ok|degraded|empty;
+- [x] `POST /api/chat` (JWT): SSE события status/token/citations/done/error, статусы ok|degraded|empty;
       stream:false → JSON
-- [ ] экспорт `docs/api/openapi.yaml` (контракт чата вкл. описание SSE-событий)
+- [x] экспорт `docs/api/openapi.yaml` (контракт чата вкл. описание SSE-событий)
 
 **E. Тесты и приёмка**
-- [ ] unit: переходы графа на FakeLLM/StubRetriever (вкл. re-plan ≤2), sanitizer/guardrails, RRF,
-      формат SSE, спаны пишутся (InMemorySpanExporter)
-- [ ] integration против compose: non-stream чат с цитатами по сидированному корпусу;
-      ветки empty/degraded; память между ходами
-- [ ] gpu_slow: LLM-as-a-Judge промпт-тесты + make-цель `test-judge`
-- [ ] Postman: чат non-stream в коллекцию
-- [ ] make lint + pytest зелёные; коммиты подшагами `stage-5(...)`, тег `stage/5`
+- [x] unit: переходы графа на FakeLLM/StubRetriever (вкл. re-plan ≤2), sanitizer/guardrails, RRF,
+      формат SSE, спаны пишутся (InMemorySpanExporter) — 91 unit зелёный
+- [x] integration против compose: non-stream чат с цитатами по сидированному корпусу;
+      ветки empty/degraded; память между ходами; ACL pre-fetch (viewer без INTERNAL,
+      аналитик с INTERNAL-соседом через граф) — 6 integration зелёных
+- [x] gpu_slow: LLM-as-a-Judge промпт-тесты + make-цель `test-judge` — 5 зелёных против LM Studio
+- [x] Postman: чат non-stream в коллекцию — newman против `graphrag/backend:stage5`:
+      14 запросов / 32 assertions / 0 fail (память сессии, injection-refusal, 401/403)
+- [x] make lint + pytest зелёные; коммиты подшагами `stage-5(...)`, тег `stage/5`
+- [x] Acceptance: вопрос → ответ с цитатами ✓; трейс в Jaeger показывает шаги графа
+      включая цикл re-plan (planner×3/tools×3 в одном трейсе) ✓; SSE-стриминг работает ✓
+
+Уроки этапа (учесть далее):
+- **HF-модели в контейнере качаются при первом чате** (bge-m3 + reranker ~4.5GB, минуты «тишины» —
+  выглядело как зависание newman): volume `hf_cache` обязателен; после пересборки образа прогревать
+  модели `docker exec ... python -c "..."` до демо/нагрузки;
+- **SSE-генератор**: гонка между `task.done()` и `await queue.get()` — ждать ЛИБО событие, ЛИБО
+  завершение задачи (`asyncio.wait(FIRST_COMPLETED)`), иначе вечное ожидание;
+- **QueueSink обязан передаваться в граф**: `build_agent_graph(runtime, sink=...)` — иначе события
+  уходят в NullSink и стрим молчит (поймано интеграционным тестом);
+- Guardrails с LLM-классификаторами добавляют 3 LLM-вызова на ход (in+out+evaluate) — для демо
+  скорости можно `APP_GUARDRAIL_USE_LLM=false` (санитайзер+эвристики остаются);
+- Newman: всегда указывать `--timeout-request`; Docker Desktop изредка клинит после длинных билдов —
+  перезапуск Desktop возвращает стек (`restart: unless-stopped`).
 
 ### [ ] Этап 6. Security RBAC сквозной
 **Deliverables:** ACL-фильтр в Qdrant query (`clearance ∈ allowed(role)`) и WHERE-условие во всех Cypher. Резолв меток из JWT.

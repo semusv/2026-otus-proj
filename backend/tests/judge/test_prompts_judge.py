@@ -8,8 +8,8 @@ Compose не нужен; LM Studio должен быть запущен - ина
 from collections.abc import AsyncIterator
 
 import pytest
-from app.agents.guardrails import ContextSource, build_context_block, extract_citations
 from app.agents.graph import EVALUATE_SYSTEM, GENERATION_SYSTEM
+from app.agents.guardrails import ContextSource, build_context_block, extract_citations
 from app.agents.planner import REPLAN_SYSTEM
 from app.llm.client import LLMClient, LLMConfig
 from app.rag.tools import KNOWN_TOOLS

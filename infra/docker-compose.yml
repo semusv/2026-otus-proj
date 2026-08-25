@@ -26,7 +26,7 @@ services:
       context: ../backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    image: graphrag/backend:stage4
+    image: graphrag/backend:stage5
     container_name: graphrag-backend
     restart: unless-stopped
     environment:
@@ -50,8 +50,13 @@ services:
       APP_GUARDRAIL_USE_LLM: ${APP_GUARDRAIL_USE_LLM:-true}
       APP_TRACING_ENABLED: ${APP_TRACING_ENABLED:-true}
       APP_OTEL_EXPORTER_ENDPOINT: ${APP_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      HF_HOME: /hf-cache/huggingface
     volumes:
       - ../corpus_test:/data/corpus:ro
+      # Кэш HuggingFace-моделей (bge-m3, bge-reranker-v2-m3 ~4.5GB суммарно):
+      # без него каждая пересозданная тара качает модели заново и первый
+      # чат-запрос "висит" минуты (уроки этапа 5)
+      - hf_cache:/hf-cache
     ports:
       - "127.0.0.1:${APP_BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -181,3 +186,5 @@ volumes:
     name: graphrag_neo4j_data
   neo4j_logs:
     name: graphrag_neo4j_logs
+  hf_cache:
+    name: graphrag_hf_cache

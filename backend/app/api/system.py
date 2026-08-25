@@ -4,7 +4,7 @@ from fastapi import APIRouter, Response
 
 router = APIRouter(tags=["system"])
 
-_VERSION = "0.3.0"
+_VERSION = "0.5.0"
 
 
 @router.get("/health", summary="Проверка живости сервиса")

@@ -1,6 +1,5 @@
 """Фикстуры judge-тестов: реальный LLM из infra/.env (LM Studio / vLLM)."""
 
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
