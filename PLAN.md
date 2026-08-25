@@ -173,7 +173,7 @@
 **Acceptance:** логин выдаёт валидный JWT, `/auth/me` возвращает роль; `make lint` и pytest зелёные; запуск без обязательных env падает с понятной ошибкой валидации; `docs/api/openapi.yaml` содержит auth-эндпоинты со схемами ошибок.
 **Тесты:** pytest unit (jwt sign/verify, резолв ACL), integration против PG из compose. Postman: auth-эндпоинты.
 
-### [ ] Этап 4. Ingestion pipeline
+### [x] Этап 4. Ingestion pipeline
 **Deliverables:** парсер XML RusLawOD → cleaner текста (чистка артефактов вида `<span class="cmd"/>`, лишних тегов) → чанкер (по «Статья N.», фолбэк — абзацы) → эмбеддинги bge-m3 (CPU; скачивание с официального HF, при блокировке — `HF_ENDPOINT` из `.env`) → upsert Qdrant (collection `chunks`, payload: act_id, title, chunk_no, clearance) → построение графа в Neo4j.
 
 Особенности реальной схемы корпуса (проверено на corpus_test, 100 файлов):
@@ -219,11 +219,22 @@ CLI-команда + `POST /admin/ingest` (background task). Разметка ч
 - [x] экспорт `docs/api/openapi.yaml`
 
 **E. Приёмка этапа**
-- [x] unit: парсер/чанкер/clearance/онтология на фикстурах corpus_test — зелёные (88 unit)
+- [x] unit: парсер/чанкер/clearance/онтология на фикстурах corpus_test — зелёные (76 unit)
 - [x] integration против compose: узлы и векторы существуют, идемпотентность повторного прогона
 - [x] полный прогон corpus_test c LM Studio (qwen3.5-2b, не-thinking модель): 2331 чанк в Qdrant (dim=1024, payload с clearance), граф: Act=100, Authority=9, Topic=1065, Concept=5897, MENTIONS=7000, REFERENCES=14
-- [ ] Postman: ingest + статус (после пересборки образа backend)
-- [ ] `make lint` + pytest зелёные; коммиты подшагами + тег `stage/4`
+- [x] Postman/Newman: 10 запросов / 19 assertions / 0 fail против пересобранного образа `graphrag/backend:stage4` (ingest start 202 → статус running/done, RBAC 401/403)
+- [x] `make lint` + pytest зелёные; коммиты подшагами + тег `stage/4`
+
+Уроки этапа (учесть далее):
+- **Блокировки event loop**: тяжёлые синхронные вызовы (загрузка модели, encode) — только через
+  `asyncio.to_thread`, иначе API перестаёт отвечать на время ingestion (два бага пойманы newman'ом);
+- **«Думающие» модели** (qwen3.5-9b и др.) отдают пустой content при малом max_tokens —
+  для служебных LLM-задач (экстракция) использовать не-thinking модель (`APP_LLM_MODEL`);
+- **Тесты не должны использовать реальные ID корпуса** — только синтетические (детерминированный
+  hash-clearance и MERGE делают прогон тестов безопасным для демо-данных);
+- API-прогон ingestion идёт в детерминированном режиме (`APP_INGEST_EXTRACT_CONCEPTS=false` в .env);
+  полный цикл с Concepts — CLI `python -m app.ingestion --concepts`. Для этапа 8 (Admin-кнопка)
+  решить: включать ли concepts в compose-окружении.
 
 ### [ ] Этап 5. Query pipeline (LangGraph)
 **Deliverables:** граф LangGraph (state machine, НЕ линейная цепочка):
