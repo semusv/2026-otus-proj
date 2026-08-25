@@ -245,6 +245,57 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 **Acceptance:** вопрос → ответ с цитатами; в трейсе видны шаги графа включая цикл re-plan; стриминг работает.
 **Тесты:** unit графа (mock LLM/retrievers, проверка переходов состояний И цикла re-plan), integration против стека, prompt-тесты LLM-as-a-Judge (маркер `gpu_slow`, отдельная команда make), тест формата SSE. Postman: чат (non-stream вариант для проверки структуры).
 
+Решения этапа (зафиксировано при планировании):
+- Planner — **гибрид**: первый проход всегда `vec+graph`; на re-plan LLM переписывает запрос
+  и выбирает инструмент добора; фолбэк на правила при сбое LLM;
+- Guardrails: `in` = длина/пустота + **базовый санитайзер** (control/zero-width символы,
+  role-токены вида `<|im_start|>`) + regex-паттерны инъекций + LLM-классификатор; `out` =
+  детерминированная проверка цитат (⊆ retrieved контекста) + опциональный LLM-контроль выхода.
+  Санитайзер всегда включён (дешёвый, ловит обфускацию, которую пропускают regex и LLM);
+  LM-вызовы классификатора отключаются конфигом (`APP_GUARDRAIL_USE_LLM`);
+- **Минимальный OTel-трейсинг** в этапе 5: ручные спаны на узлах графа → otel-collector → Jaeger
+  (acceptance «шаги графа видны в трейсе»); полные три столпа (метрики/логи/auto-instrumentation) — этап 7;
+- `POST /api/chat` c флагом `stream` в теле (default true): true → SSE,
+  false → обычный JSON (Postman/нагрузочный тест этапа 9).
+
+Чек-лист выполнения:
+
+**A. Зависимости и конфиг**
+- [ ] deps: langgraph (пин версии), opentelemetry-api/sdk + OTLP-exporter; `.env.example` дополнен
+- [ ] config: APP_RAG_VECTOR_TOP_K, APP_RAG_FINAL_TOP_N, APP_RAG_GRAPH_HOPS (1–2),
+      APP_AGENT_MAX_ITERATIONS (2), APP_GENERATE_TEMPERATURE/MAX_TOKENS,
+      APP_RERANK_MODEL/APP_RERANK_DEVICE, APP_CHAT_HISTORY_LIMIT, APP_GUARDRAIL_*, APP_TRACING_ENABLED
+
+**B. Инфраструктурные кирпичи**
+- [ ] `llm/client.py`: `stream(system, user, ...) -> AsyncIterator[str]`
+- [ ] миграция `0002_chat_sessions_messages`: chat_sessions + chat_messages(role, content, sources JSONB, trace_id)
+- [ ] `rag/retrievers.py`: retrieve_vec (Qdrant filter clearance ∈ allowed), expand_graph (Cypher WHERE clearance, 1–2 hop)
+- [ ] `rag/fusion.py` (RRF), `rag/reranker.py` (bge-reranker-v2-m3, lazy CPU, asyncio.to_thread),
+      singleton Embedder для query-вектора (to_thread)
+
+**C. Агент (Memory / Planner / Tools Interface)**
+- [ ] `rag/tools.py` — Tools Interface (реестр инструментов, типизированные результаты)
+- [ ] `agents/memory.py` — история сессии из PG ↔ состояние графа (load_history / append_turn)
+- [ ] `agents/planner.py` — правила + LLM rewrite/re-plan
+- [ ] `agents/guardrails.py` — sanitize_query + in (эвристики + LLM verdict) + out (цитаты ⊆ контекста, опц. LLM)
+- [ ] `agents/graph.py` — AgentState(TypedDict); guardrail_in → planner → tools(vec|graph|both) → fusion →
+      rerank → generate(stream→накопление) → evaluate → (re-plan ≤2 | guardrail_out) → END;
+      компиляция в lifespan на app.state; спан на каждый узел
+
+**D. API**
+- [ ] `POST /api/chat` (JWT): SSE события status/token/citations/done/error, статусы ok|degraded|empty;
+      stream:false → JSON
+- [ ] экспорт `docs/api/openapi.yaml` (контракт чата вкл. описание SSE-событий)
+
+**E. Тесты и приёмка**
+- [ ] unit: переходы графа на FakeLLM/StubRetriever (вкл. re-plan ≤2), sanitizer/guardrails, RRF,
+      формат SSE, спаны пишутся (InMemorySpanExporter)
+- [ ] integration против compose: non-stream чат с цитатами по сидированному корпусу;
+      ветки empty/degraded; память между ходами
+- [ ] gpu_slow: LLM-as-a-Judge промпт-тесты + make-цель `test-judge`
+- [ ] Postman: чат non-stream в коллекцию
+- [ ] make lint + pytest зелёные; коммиты подшагами `stage-5(...)`, тег `stage/5`
+
 ### [ ] Этап 6. Security RBAC сквозной
 **Deliverables:** ACL-фильтр в Qdrant query (`clearance ∈ allowed(role)`) и WHERE-условие во всех Cypher. Резолв меток из JWT.
 **Acceptance (критично!):** User B (viewer) не получает контент SECRET-акта ни в ответе, ни в цитатах, ни через расширение графа; User A (analyst) получает INTERNAL.
