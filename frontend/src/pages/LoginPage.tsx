@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ApiError, login, me } from '../lib/api'
+import { ApiError, login, me, register } from '../lib/api'
 import { applyProfile, getAuth, saveAuth } from '../lib/auth'
 
 interface LoginPageProps {
@@ -8,6 +8,7 @@ interface LoginPageProps {
 }
 
 export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPageProps) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [pending, setPending] = useState(false)
@@ -18,7 +19,10 @@ export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPagePr
     setError(null)
     setPending(true)
     try {
-      const token = await login({ username, password })
+      // регистрация сознательно даёт минимальную роль viewer (PUBLIC);
+      // расширение доступа — только через администратора (Admin → Пользователи)
+      const token =
+        mode === 'login' ? await login({ username, password }) : await register({ username, password })
       saveAuth(token)
       try {
         applyProfile(await me())
@@ -30,11 +34,13 @@ export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPagePr
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError('Неверный логин или пароль')
+      } else if (err instanceof ApiError && err.status === 409) {
+        setError('Это имя уже занято')
       } else if (err instanceof ApiError) {
         setError(err.message)
         if (err.status === 0) onUnauthorizedError()
       } else {
-        setError('Неизвестная ошибка входа')
+        setError(mode === 'login' ? 'Неизвестная ошибка входа' : 'Не удалось зарегистрироваться')
       }
     } finally {
       setPending(false)
@@ -47,7 +53,11 @@ export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPagePr
         <div className="login-head">
           <Logo />
           <h1>GraphRAG</h1>
-          <p className="muted">Платформа корпоративных знаний · вход по учётной записи</p>
+          <p className="muted">
+            {mode === 'login'
+              ? 'Платформа корпоративных знаний · вход по учётной записи'
+              : 'Создание учётной записи · роль viewer (доступ только к PUBLIC)'}
+          </p>
         </div>
         <label className="field">
           <span>Логин</span>
@@ -58,7 +68,10 @@ export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPagePr
             autoFocus
             required
             minLength={3}
-            placeholder="viewer / analyst / admin"
+            maxLength={64}
+            pattern="[a-zA-Z0-9_.\-]+"
+            title="Латиница, цифры, точка, дефис, подчёркивание; от 3 символов"
+            placeholder={mode === 'login' ? 'viewer / analyst / admin' : 'придумайте логин'}
           />
         </label>
         <label className="field">
@@ -67,10 +80,11 @@ export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPagePr
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             required
             minLength={8}
-            placeholder="••••••••"
+            maxLength={72}
+            placeholder={mode === 'login' ? '••••••••' : 'минимум 8 символов'}
           />
         </label>
         {error !== null && (
@@ -79,9 +93,19 @@ export default function LoginPage({ onAuthed, onUnauthorizedError }: LoginPagePr
           </div>
         )}
         <button className="btn btn-primary" type="submit" disabled={pending}>
-          {pending ? <Spinner /> : 'Войти'}
+          {pending ? <Spinner /> : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
         </button>
-        <p className="hint muted">JWT выдаётся бэкендом и хранится до закрытия вкладки</p>
+        <button type="button" className="linklike" onClick={() => {
+          setMode(mode === 'login' ? 'register' : 'login')
+          setError(null)
+        }}>
+          {mode === 'login' ? 'Нет учётной записи? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+        </button>
+        <p className="hint muted">
+          {mode === 'login'
+            ? 'JWT выдаётся бэкендом и хранится до закрытия вкладки'
+            : 'Роль analyst/admin выдаёт администратор во вкладке Админ'}
+        </p>
       </form>
     </div>
   )

@@ -1,4 +1,4 @@
-/* Компоненты и layout. Цвета — только через переменные из theme.css. */
+﻿/* Компоненты и layout. Цвета — только через переменные из theme.css. */
 
 /* ---------- каркас ---------- */
 .app {
@@ -820,5 +820,87 @@ textarea:focus {
 
   .meta-trace {
     margin-left: 0;
+  }
+}
+
+/* регистрация на экране входа */
+.linklike {
+  background: none;
+  border: none;
+  color: var(--accent-hover);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.linklike:hover {
+  text-decoration: underline;
+}
+
+/* карточка Пользователи */
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+
+.user-name {
+  min-width: 120px;
+  font-weight: 600;
+}
+
+.chip-row {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.clearance-chip {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+
+.clearance-public {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.clearance-internal {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.clearance-secret {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.user-create {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .user-create {
+    grid-template-columns: 1fr;
   }
 }

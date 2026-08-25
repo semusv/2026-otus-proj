@@ -58,6 +58,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Саморегистрация: роль viewer (только PUBLIC), JWT выдаётся сразу
+         * @description Открытая регистрация умышленно даёт минимальную роль viewer.
+         *
+         *     Расширение доступа (analyst/admin) — только через администратора:
+         *     POST /admin/users. Аудит: auth.register.
+         */
+        post: operations["register_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -120,6 +143,27 @@ export interface paths {
         get: operations["storage_stats_admin_stats_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Список учётных записей (без секретов) */
+        get: operations["list_users_admin_users_get"];
+        put?: never;
+        /**
+         * Создать учётную запись с указанной ролью
+         * @description Роль задаёт метки доступа: viewer→PUBLIC, analyst→PUBLIC+INTERNAL, admin→все.
+         */
+        post: operations["add_user_admin_users_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -340,6 +384,66 @@ export interface components {
             /** Role */
             role: string;
         };
+        /**
+         * UserCreate
+         * @description Создание учётной записи администратором.
+         * @example {
+         *       "password": "qa123456",
+         *       "role": "viewer",
+         *       "username": "qa_viewer"
+         *     }
+         */
+        UserCreate: {
+            /**
+             * Username
+             * @description Имя пользователя (уникально)
+             */
+            username: string;
+            /**
+             * Password
+             * @description Пароль (bcrypt на сервере)
+             */
+            password: string;
+            /**
+             * Role
+             * @description Роль определяет метки доступа
+             * @default viewer
+             * @enum {string}
+             */
+            role: "viewer" | "analyst" | "admin";
+        };
+        /**
+         * UserOut
+         * @description Учётная запись без секретов.
+         */
+        UserOut: {
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "viewer" | "analyst" | "admin";
+            /**
+             * Clearances
+             * @description Метки доступа роли
+             */
+            clearances: string[];
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** UsersListResponse */
+        UsersListResponse: {
+            /** Users */
+            users: components["schemas"]["UserOut"][];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -443,6 +547,46 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    register_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Имя пользователя занято */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Неверный формат имени/пароля */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -560,6 +704,80 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_users_admin_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsersListResponse"];
+                };
+            };
+            /** @description Не admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_user_admin_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Не admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Имя занято */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

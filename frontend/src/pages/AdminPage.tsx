@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, ingestStatus, startIngest, storageStats } from '../lib/api'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  ApiError,
+  adminCreateUser,
+  adminListUsers,
+  ingestStatus,
+  startIngest,
+  storageStats,
+} from '../lib/api'
 import type { components } from '../lib/api-types'
 
 type IngestStatusResponse = components['schemas']['IngestStatusResponse']
 type StorageStats = components['schemas']['StorageStatsResponse']
+type UserOut = components['schemas']['UserOut']
 
 interface AdminPageProps {
   onUnauthorized: () => void
@@ -20,6 +28,12 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
   const [status, setStatus] = useState<IngestStatusResponse | null>(null)
   const [stats, setStats] = useState<StorageStats | null>(null)
   const [statsError, setStatsError] = useState<string | null>(null)
+  const [users, setUsers] = useState<UserOut[] | null>(null)
+  const [usersError, setUsersError] = useState<string | null>(null)
+  const [newUsername, setNewUsername] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newRole, setNewRole] = useState<'viewer' | 'analyst' | 'admin'>('viewer')
+  const [userNotice, setUserNotice] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -39,6 +53,40 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       setStatsError(err instanceof ApiError ? err.message : 'Не удалось получить статистику')
     }
   }, [])
+
+  const refreshUsers = useCallback(async () => {
+    try {
+      const list = await adminListUsers()
+      setUsers(list.users)
+      setUsersError(null)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onUnauthorized()
+      else setUsersError(err instanceof ApiError ? err.message : 'Не удалось получить список')
+    }
+  }, [onUnauthorized])
+
+  const createUser = async (event: FormEvent) => {
+    event.preventDefault()
+    setUserNotice(null)
+    setUsersError(null)
+    try {
+      const created = await adminCreateUser({
+        username: newUsername,
+        password: newPassword,
+        role: newRole,
+      })
+      setUserNotice(
+        `Создан ${created.username} (${created.role}): метки доступа ${created.clearances.join(', ')}`,
+      )
+      setNewUsername('')
+      setNewPassword('')
+      await refreshUsers()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) setUsersError('Это имя уже занято')
+      else if (err instanceof ApiError && err.status === 401) onUnauthorized()
+      else setUsersError(err instanceof ApiError ? err.message : 'Не удалось создать пользователя')
+    }
+  }
 
   // первичная загрузка + поллинг статуса и статистики, пока идёт прогон
   useEffect(() => {
@@ -60,6 +108,7 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
 
     timer = setTimeout(() => {
       void refreshStats()
+      void refreshUsers()
       tick()
     }, 0)
 
@@ -67,7 +116,7 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       disposed = true
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [refreshStatus, refreshStats])
+  }, [refreshStatus, refreshStats, refreshUsers])
 
   // тикер прошедшего времени во время прогона
   useEffect(() => {
@@ -211,6 +260,67 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
             Обновить статистику
           </button>
         </div>
+
+        <h3 className="stats-title">Пользователи</h3>
+        <p className="muted stats-subtitle">
+          Роль определяет метки доступа: viewer → PUBLIC · analyst → PUBLIC+INTERNAL · admin → все
+          (включая SECRET). Созданный пользователь сразу может войти.
+        </p>
+
+        {usersError !== null && <div className="error-box">{usersError}</div>}
+        {userNotice !== null && <div className="info-box">{userNotice}</div>}
+
+        {users === null ? (
+          <p className="muted">{usersError === null ? 'Загрузка…' : ''}</p>
+        ) : (
+          <div className="user-list">
+            {users.map((u) => (
+              <div key={u.user_id} className="user-row" title={u.created_at}>
+                <span className="mono user-name">{u.username}</span>
+                <span className={`badge ${u.role === 'admin' ? 'badge-err' : u.role === 'analyst' ? 'badge-info' : 'badge-neutral'}`}>
+                  {u.role}
+                </span>
+                <span className="chip-row">
+                  {u.clearances.map((c) => (
+                    <span key={c} className={`clearance-chip clearance-${c.toLowerCase()}`}>{c}</span>
+                  ))}
+                </span>
+                {!u.is_active && <span className="badge badge-neutral">деактивирован</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form className="user-create" onSubmit={(e) => void createUser(e)}>
+          <input
+            className="mono"
+            value={newUsername}
+            onChange={(e) => setNewUsername(e.target.value)}
+            placeholder="логин"
+            required
+            minLength={3}
+            maxLength={64}
+            pattern="[a-zA-Z0-9_.\-]+"
+            title="Латиница, цифры, . - _ ; от 3 символов"
+          />
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="пароль (мин. 8)"
+            required
+            minLength={8}
+            maxLength={72}
+          />
+          <select value={newRole} onChange={(e) => setNewRole(e.target.value as typeof newRole)}>
+            <option value="viewer">viewer (PUBLIC)</option>
+            <option value="analyst">analyst (+INTERNAL)</option>
+            <option value="admin">admin (все)</option>
+          </select>
+          <button className="btn btn-primary btn-small" type="submit">
+            Создать
+          </button>
+        </form>
 
         <p className="hint muted">Статус обновляется автоматически каждые {POLL_INTERVAL_MS / 1000} с во время прогона</p>
       </div>

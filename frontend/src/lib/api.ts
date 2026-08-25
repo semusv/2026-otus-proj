@@ -18,6 +18,9 @@ export type IngestStartResponse = components['schemas']['IngestStartResponse']
 export type IngestStatusResponse = components['schemas']['IngestStatusResponse']
 export type ChatRequest = components['schemas']['ChatRequest']
 export type StorageStats = components['schemas']['StorageStatsResponse']
+export type UserCreate = components['schemas']['UserCreate']
+export type UserOut = components['schemas']['UserOut']
+export type UsersListResponse = components['schemas']['UsersListResponse']
 
 export class ApiError extends Error {
   readonly status: number
@@ -133,6 +136,29 @@ export function ingestStatus(): Promise<IngestStatusResponse> {
 /** Агрегаты наполнения хранилищ (Qdrant/Neo4j/PG) — admin-only, этап 8. */
 export function storageStats(): Promise<StorageStats> {
   return request<StorageStats>('/admin/stats')
+}
+
+/** Саморегистрация: всегда роль viewer (PUBLIC), JWT выдаётся сразу. */
+export function register(body: LoginRequest): Promise<TokenResponse> {
+  return request<TokenResponse>('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+/** Список учётных записей — admin-only. */
+export function adminListUsers(): Promise<UsersListResponse> {
+  return request<UsersListResponse>('/admin/users')
+}
+
+/** Создать пользователя с указанной ролью — admin-only. */
+export function adminCreateUser(body: UserCreate): Promise<UserOut> {
+  return request<UserOut>('/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 }
 
 /**
