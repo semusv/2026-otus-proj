@@ -1,11 +1,4 @@
-"""Общие фикстуры тестов; окружение задаётся до импорта приложения."""
-
-import os
-
-os.environ.setdefault("APP_JWT_SECRET", "unit-test-secret-0123456789")
-os.environ.setdefault("APP_PG_USER", "env_test_user")
-os.environ.setdefault("APP_PG_PASSWORD", "env_test_pass")
-os.environ.setdefault("APP_PG_DB", "env_test_db")
+"""Общие фикстуры тестов."""
 
 from collections.abc import Callable
 
