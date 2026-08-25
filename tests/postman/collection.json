@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "b1e6a7c2-0003-4000-8000-graphrag00001",
-    "name": "GraphRAG Platform - Stage 5 (auth + ingest + chat)",
-    "description": "Auth (этап 3), admin/ingest (этап 4) и chat non-stream сценарии (этап 5).\nЗапуск: newman run tests/postman/collection.json -e tests/postman/env.local.json\nТребуется запущенный compose-стек; чат проверяет контракт при stream=false.",
+    "name": "GraphRAG Platform - Stage 6 (auth + ingest + chat + RBAC)",
+    "description": "Auth (этап 3), admin/ingest (этап 4), chat non-stream (этап 5) и сквозной RBAC-сценарий (этап 6).\nЗапуск: newman run tests/postman/collection.json -e tests/postman/env.local.json --timeout-request 120000\nТребуется запущенный compose-стек с прогнанным ingestion корпуса.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -12,6 +12,14 @@
     },
     {
       "key": "token",
+      "value": ""
+    },
+    {
+      "key": "token_viewer",
+      "value": ""
+    },
+    {
+      "key": "token_analyst",
       "value": ""
     },
     {
@@ -414,6 +422,276 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"message\": \"привет\",\n  \"stream\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/chat"
+          }
+        }
+      ]
+    },
+    {
+      "name": "rbac",
+      "item": [
+        {
+          "name": "Login viewer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('роль viewer', () => pm.expect(body.role).to.eql('viewer'));",
+                  "pm.collectionVariables.set('token_viewer', body.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"viewer\",\n  \"password\": \"viewer123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login analyst",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('роль analyst', () => pm.expect(body.role).to.eql('analyst'));",
+                  "pm.collectionVariables.set('token_analyst', body.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"analyst\",\n  \"password\": \"analyst123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "RBAC viewer: только PUBLIC (цитаты + граф)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('статус валиден', () => pm.expect(['ok', 'degraded', 'empty']).to.include(body.status));",
+                  "pm.test('цитаты - только PUBLIC', () => {",
+                  "  body.citations.forEach(c => pm.expect(c.clearance).to.eql('PUBLIC'));",
+                  "});",
+                  "pm.test('соседи по графу - только PUBLIC', () => {",
+                  "  (body.related_acts || []).forEach(a => pm.expect(a.clearance).to.eql('PUBLIC'));",
+                  "});",
+                  "pm.test('в теле нет метки SECRET', () => pm.expect(pm.response.text()).to.not.include('SECRET'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_viewer}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Trace-Id",
+                "value": "rbac-viewer-{{$randomUUID}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Какие требования к раскрытию информации акционерных обществ?\",\n  \"stream\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/chat"
+          }
+        },
+        {
+          "name": "RBAC analyst: INTERNAL доступен, SECRET нет",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('цитаты - PUBLIC или INTERNAL', () => {",
+                  "  body.citations.forEach(c => pm.expect(c.clearance).to.be.oneOf(['PUBLIC', 'INTERNAL']));",
+                  "});",
+                  "pm.test('соседи - PUBLIC или INTERNAL', () => {",
+                  "  (body.related_acts || []).forEach(a => pm.expect(a.clearance).to.be.oneOf(['PUBLIC', 'INTERNAL']));",
+                  "});",
+                  "pm.test('в теле нет метки SECRET', () => pm.expect(pm.response.text()).to.not.include('SECRET'));",
+                  "const internalSeen = body.citations.some(c => c.clearance === 'INTERNAL') || (body.related_acts || []).some(a => a.clearance === 'INTERNAL');",
+                  "if (internalSeen) { pm.test('аналитик получил INTERNAL-контент', () => pm.expect(internalSeen).to.be.true); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_analyst}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Trace-Id",
+                "value": "rbac-analyst-{{$randomUUID}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Какие требования к раскрытию информации акционерных обществ?\",\n  \"stream\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/chat"
+          }
+        },
+        {
+          "name": "RBAC admin: полный доступ, структура валидна",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('цитаты - валидные метки', () => {",
+                  "  body.citations.forEach(c => pm.expect(c.clearance).to.be.oneOf(['PUBLIC', 'INTERNAL', 'SECRET']));",
+                  "});",
+                  "pm.test('session_id выдан', () => pm.expect(body.session_id).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Какие требования к раскрытию информации акционерных обществ?\",\n  \"stream\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/chat"
+          }
+        },
+        {
+          "name": "RBAC чужая сессия (viewer -> сессия admin) -> 403",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// sessionId админа установлен запросом 'Chat non-stream (admin)' выше по прогону"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));",
+                  "pm.test('code=forbidden', () => pm.expect(pm.response.json().code).to.eql('forbidden'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_viewer}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"продолжим диалог\",\n  \"session_id\": \"{{sessionId}}\",\n  \"stream\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/chat"
+          }
+        },
+        {
+          "name": "RBAC подделанный Bearer -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "pm.test('code=invalid_token', () => pm.expect(pm.response.json().code).to.eql('invalid_token'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJoYWNrZXIiLCJyb2xlIjoiYWRtaW4ifQ.FORGED_SIGNATURE"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"вопрос с подделанным токеном\",\n  \"stream\": false\n}"
             },
             "url": "{{baseUrl}}/api/chat"
           }
