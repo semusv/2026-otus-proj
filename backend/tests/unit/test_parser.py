@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from app.ingestion.parser import normalize_date, normalize_status, parse_act
+from app.ingestion.parser import ParsedAct, normalize_date, normalize_status, parse_act
 
 pytestmark = pytest.mark.unit
 
@@ -15,12 +15,12 @@ def _load(name: str) -> str:
 
 
 @pytest.fixture
-def act_full() -> object:
+def act_full() -> ParsedAct:
     return parse_act(_load("act_full.xml"))
 
 
 class TestParseFull:
-    def test_identification(self, act_full: object) -> None:
+    def test_identification(self, act_full: ParsedAct) -> None:
         assert act_full.id == "102010098"
         assert act_full.title == "Об утверждении Гражданского процессуального кодекса РСФСР"
         assert act_full.doc_number == "б/н"
