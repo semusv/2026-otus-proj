@@ -1,6 +1,5 @@
 """Unit-тесты парсера RusLawOD на фикстурах по образцу реального корпуса."""
 
-import importlib.resources
 from pathlib import Path
 
 import pytest
@@ -88,10 +87,14 @@ class TestNormalizers:
 
 class TestErrors:
     def test_missing_id_raises(self) -> None:
-        xml = '<act><meta><identification><docdateIPS val="01.01.2000"/></identification></meta></act>'
+        xml = (
+            '<act><meta><identification>'
+            '<docdateIPS val="01.01.2000"/>'
+            "</identification></meta></act>"
+        )
         with pytest.raises(ValueError, match="pravogovruNd"):
             parse_act(xml)
 
     def test_invalid_xml_raises(self) -> None:
-        with pytest.raises(Exception):  # noqa: B017, PT011 - ET отдаёт ParseError
+        with pytest.raises(Exception):  # noqa: B017 - ET отдаёт ParseError
             parse_act("<not-closed")

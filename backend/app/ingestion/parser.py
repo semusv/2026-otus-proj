@@ -94,7 +94,8 @@ def _extract_ref_ids(text: str) -> tuple[str, ...]:
 
 def parse_act(xml_content: bytes | str) -> ParsedAct:
     """Разбирает один XML-файл RusLawOD. Отсутствие id - ошибка данных."""
-    root = ElementTree.fromstring(xml_content)
+    # S314: корпус - локальные доверенные файлы датасета, внешнему вводу не подлежит
+    root = ElementTree.fromstring(xml_content)  # noqa: S314
 
     def _val(path: str) -> str:
         node = root.find(path)
