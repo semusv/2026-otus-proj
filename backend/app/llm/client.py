@@ -5,15 +5,18 @@
 Каждый вызов отражается generation'ой в Langfuse (этап 7, best-effort).
 """
 
+import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import APIError, AsyncOpenAI
 
 from app.observability.langfuse_client import finish_generation, llm_generation
+
+_RETRY_DELAY_S = 0.5
 
 
 @dataclass(frozen=True)
@@ -24,7 +27,11 @@ class LLMConfig:
 
 
 class LLMClient:
-    """Тонкая обёртка над chat.completions c устойчивым парсингом JSON-ответов."""
+    """Тонкая обёртка над chat.completions c устойчивым парсингом JSON-ответов.
+
+    Транзиентные ошибки upstream (LM Studio/vLLM) ретраятся ОДИН раз -
+    наблюдаемый плавающий сбой jinja-рендера промпта лечится повтором.
+    """
 
     def __init__(self, config: LLMConfig, *, timeout_s: float = 120.0) -> None:
         self._client = AsyncOpenAI(
@@ -33,6 +40,13 @@ class LLMClient:
             timeout=timeout_s,
         )
         self.model = config.model
+
+    async def _create_with_retry(self, **kwargs: Any) -> Any:
+        try:
+            return await self._client.chat.completions.create(**kwargs)
+        except APIError:
+            await asyncio.sleep(_RETRY_DELAY_S)
+            return await self._client.chat.completions.create(**kwargs)
 
     async def complete(
         self,
@@ -49,9 +63,9 @@ class LLMClient:
         with llm_generation(name="llm.complete", model=self.model,
                                   messages=messages) as gen:
             try:
-                response = await self._client.chat.completions.create(
+                response = await self._create_with_retry(
                     model=self.model,
-                    messages=messages,  # type: ignore[arg-type]
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
@@ -79,9 +93,9 @@ class LLMClient:
                                   messages=messages) as gen:
             accumulated: list[str] = []
             try:
-                response: Any = await self._client.chat.completions.create(
+                response = await self._create_with_retry(
                     model=self.model,
-                    messages=messages,  # type: ignore[arg-type]
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,

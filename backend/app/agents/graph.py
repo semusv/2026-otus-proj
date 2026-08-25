@@ -333,13 +333,28 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
         messages.append({"role": "user", "content": user_content})
 
         parts: list[str] = []
-        async for delta in runtime.llm.stream(
-            messages,
-            temperature=cfg.generate_temperature,
-            max_tokens=cfg.generate_max_tokens,
-        ):
-            parts.append(delta)
-            await events.emit("token", {"delta": delta})
+        notes = list(state.get("notes", []))
+        try:
+            async for delta in runtime.llm.stream(
+                messages,
+                temperature=cfg.generate_temperature,
+                max_tokens=cfg.generate_max_tokens,
+            ):
+                parts.append(delta)
+                await events.emit("token", {"delta": delta})
+        except Exception as exc:
+            # upstream LLM недоступен/ошибся после ретрая - деградация вместо 500
+            # (философия этапа 5: сбои компонентов отражаются статусами)
+            logger.warning("generate: LLM недоступен, деградация ответа", exc_info=exc)
+            notes.append("generate_llm_error")
+            if not parts:
+                return {
+                    "answer": "",
+                    "status": "degraded",
+                    "notes": notes,
+                    "citations": [],
+                }
+            return {"answer": "".join(parts), "status": "degraded", "notes": notes}
         return {"answer": "".join(parts)}
 
     @traced_node("evaluate")
