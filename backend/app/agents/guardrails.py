@@ -129,13 +129,37 @@ class GuardrailOutResult:
 _CITATION_RE = re.compile(r"\[(S\d+)\]")
 
 
-def build_context_block(sources: list[ContextSource], graph_context_text: str) -> str:
-    """Собирает блок источников с маркерами [S1]..[Sn] + факты графа."""
+def build_context_block(
+    sources: list[ContextSource],
+    graph_context_text: str,
+    *,
+    char_budget: int | None = None,
+) -> str:
+    """Собирает блок источников с маркерами [S1]..[Sn] + факты графа.
+
+    char_budget ограничивает суммарный размер блока (урезается текст каждого
+    источника равномерно): переполненный контекст ломает генерацию на моделях
+    с малым окном - сервер обрезает промпт и теряет user-запрос (этап 9).
+    """
+    per_source_budget: int | None = None
+    graph_budget: int | None = None
+    if char_budget is not None and sources:
+        # резервы: граф-факты ~1/7 бюджета, ~150 симв./источник на заголовки
+        graph_budget = max(200, char_budget // 7)
+        per_source_budget = max(
+            200, (char_budget - graph_budget - 150 * len(sources)) // len(sources)
+        )
     parts: list[str] = []
     for source in sources:
-        parts.append(f"[{source.source_id}] {source.title} ({source.clearance}):\n{source.text}")
+        text = source.text
+        if per_source_budget is not None and len(text) > per_source_budget:
+            text = text[:per_source_budget].rstrip() + " …"
+        parts.append(f"[{source.source_id}] {source.title} ({source.clearance}):\n{text}")
     if graph_context_text:
-        parts.append(f"Связи из графа знаний:\n{graph_context_text}")
+        graph_text = graph_context_text
+        if graph_budget is not None and len(graph_text) > graph_budget:
+            graph_text = graph_text[:graph_budget].rstrip() + " …"
+        parts.append(f"Связи из графа знаний:\n{graph_text}")
     return "\n\n".join(parts)
 
 

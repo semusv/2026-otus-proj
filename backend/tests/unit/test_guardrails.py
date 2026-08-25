@@ -86,3 +86,26 @@ def test_build_context_block_contains_markers_and_graph() -> None:
     assert "[S1] Акт первый (PUBLIC):" in block
     assert "[S2] Акт второй (INTERNAL):" in block
     assert "Связи из графа знаний" in block
+
+
+def test_build_context_block_without_budget_keeps_full_text() -> None:
+    big_text = "Т" * 5000
+    sources = [ContextSource("S1", "100", "Акт", 0, "PUBLIC", big_text)]
+    block = build_context_block(sources, "")
+    assert big_text in block
+
+
+def test_build_context_block_respects_char_budget() -> None:
+    big_text = "Т" * 5000
+    sources = [
+        ContextSource(f"S{i}", str(i * 100), f"Акт {i}", i, "PUBLIC", big_text)
+        for i in range(1, 6)
+    ]
+    graph = "Г" * 3000
+    budget = 9000
+    block = build_context_block(sources, graph, char_budget=budget)
+    # все маркеры источников сохранены (цитаты остаются валидными)
+    for i in range(1, 6):
+        assert f"[S{i}]" in block
+    assert len(block) <= budget + 300  # допуск на заголовки источников
+    assert "…" in block  # текст урезан с маркером обрыва

@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     # --- Генерация (vLLM/LM Studio) ---
     generate_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     generate_max_tokens: int = Field(default=1024, ge=64)
+    # Бюджет символов блока источников в промпте генерации: переполненный
+    # контекст ломает генерацию на малых окнах (сервер теряет user-запрос,
+    # этап 9). Ориентир: 9000 симв. ~ 3-4k токенов RU + max_tokens + история.
+    generate_ctx_char_budget: int = Field(default=9000, ge=1000)
 
     # --- Reranker (bge-reranker-v2-m3, CPU-in-process, ADR-009) ---
     rerank_model: str = "BAAI/bge-reranker-v2-m3"

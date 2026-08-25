@@ -20,9 +20,10 @@ CHAT_LOGIN_USER = os.environ.get("LOAD_CHAT_USER", "analyst")
 CHAT_LOGIN_PASS = os.environ.get("LOAD_CHAT_PASS", "analyst123")
 CHAT_TIMEOUT = float(os.environ.get("LOAD_CHAT_TIMEOUT", "170"))
 
-QUESTION = (
-    "Кратко перечисли до двух нормативных документов по теме запроса "
-    "и назови их одним предложением."
+QUESTION = os.environ.get(
+    "LOAD_CHAT_QUESTION",
+    "Что регулирует Гражданский процессуальный кодекс Российской Федерации? "
+    "Ответь двумя предложениями.",
 )
 
 

@@ -313,7 +313,9 @@ def build_agent_graph(runtime: AgentRuntime, *, sink: ChatEventSink | None = Non
             for index, chunk in enumerate(top, start=1)
         ]
         context_block = build_context_block(
-            sources, state.get("expansion_context_text", "")
+            sources,
+            state.get("expansion_context_text", ""),
+            char_budget=cfg.generate_ctx_char_budget,
         )
         return {"sources": sources, "context_block": context_block}
 
