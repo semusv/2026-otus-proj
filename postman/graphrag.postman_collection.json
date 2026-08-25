@@ -73,6 +73,26 @@
       ]
     },
     {
+      "name": "01b Me admin (id для self-теста)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "url": "{{baseURL}}/auth/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"adminId\", pm.response.json().user_id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "02 Admin создаёт user A (viewer)",
       "request": {
         "method": "POST",
@@ -100,7 +120,8 @@
               "  pm.expect(body.role).to.eql(\"viewer\");",
               "  pm.expect(body.clearances).to.eql([\"PUBLIC\"]);",
               "  pm.expect(JSON.stringify(body)).to.not.include(\"password\");",
-              "});"
+              "});",
+              "pm.collectionVariables.set(\"userAId\", pm.response.json().user_id);"
             ]
           }
         }
@@ -402,7 +423,91 @@
       ]
     },
     {
-      "name": "13 Публичная регистрация user C",
+      "name": "13 Admin меняет роль A: viewer -> analyst",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": "{{baseURL}}/admin/users/{{userAId}}",
+        "description": "Права применяются сразу: clearances резолвятся из БД на каждом запросе, перелогин не нужен. userAId сохранён при создании user A.",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"role\":\"analyst\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200, analyst, INTERNAL+PUBLIC\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.role).to.eql(\"analyst\");",
+              "  pm.expect(body.clearances).to.eql([\"INTERNAL\", \"PUBLIC\"]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Me user A после смены роли (старый токен)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenA}}" }],
+        "url": "{{baseURL}}/auth/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"права расширены без перелогина\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.role).to.eql(\"analyst\");",
+              "  pm.expect(body.clearances).to.eql([\"INTERNAL\", \"PUBLIC\"]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Admin не меняет собственную роль -> 403",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": "{{baseURL}}/admin/users/{{adminId}}",
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\"role\":\"viewer\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"403 своя роль запрещена\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Публичная регистрация user C",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -431,7 +536,7 @@
       ]
     },
     {
-      "name": "14 Повторная регистрация -> 409",
+      "name": "17 Повторная регистрация -> 409",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -453,7 +558,7 @@
       ]
     },
     {
-      "name": "15 Слабый пароль -> 422",
+      "name": "18 Слабый пароль -> 422",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -475,7 +580,7 @@
       ]
     },
     {
-      "name": "16 Неверный пароль -> 401",
+      "name": "19 Неверный пароль -> 401",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -497,7 +602,7 @@
       ]
     },
     {
-      "name": "17 Аноним к admin API -> 401",
+      "name": "20 Аноним к admin API -> 401",
       "request": {
         "method": "GET",
         "url": "{{baseURL}}/admin/users"
