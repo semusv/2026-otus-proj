@@ -116,11 +116,14 @@ def check_containers(expected: list[str], running: dict[str, dict]) -> tuple[lis
     return rows, fails
 
 
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def http_check(url: str, host_header: str | None = None) -> tuple[bool, str]:
     headers = {"Host": host_header} if host_header else {}
     req = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with _OPENER.open(req, timeout=10) as resp:
             return resp.status == 200, f"HTTP {resp.status}"
     except urllib.error.HTTPError as e:
         return False, f"HTTP {e.code}"
@@ -185,6 +188,18 @@ def main() -> None:
             fails += 1
     else:
         rows.append(("langfuse", "external", "SKIP", "LANGFUSE_URL пуст"))
+
+    llm_base = env.get("APP_LLM_BASE_URL", "")
+    if llm_base:
+        url = llm_base.replace("host.docker.internal", "127.0.0.1").rstrip("/")
+        ok, detail = http_check(url + "/models",
+                                host_header=None)
+        rows.append((f"llm {env.get('APP_LLM_MODEL', '?')}", "external",
+                     "OK" if ok else "FAIL", detail))
+        if not ok:
+            fails += 1
+    else:
+        rows.append(("llm", "external", "SKIP", "APP_LLM_BASE_URL пуст"))
 
     print()
     print(f"{'TARGET':<28} {'KIND':<10} {'RESULT':<6} DETAIL")

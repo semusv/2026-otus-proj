@@ -9,7 +9,7 @@
 - **Тема реализации:** Advanced RAG → **GraphRAG (Knowledge Graphs)**. Простой векторный поиск не принимается.
 - **Датасет:** RusLawOD v3 (XML правовых актов РФ, 1991–2025): https://github.com/irlcode/RusLawOD. Тестовый корпус — `corpus_test/` (100 файлов).
 - **Референс структуры backend:** https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template (пишем с нуля, оглядываясь на структуру).
-- **Стек:** Python 3.11+ / FastAPI · LangGraph · vLLM (Qwen3-8B-AWQ) · Qdrant · Neo4j Community · PostgreSQL 16 · Traefik · OTel→Jaeger/Prometheus/Grafana · Langfuse (внешний docker-инстанс) · React SPA.
+- **Стек:** Python 3.11+ / FastAPI · LangGraph · LLM Serving: dev — LM Studio (OpenAI-compatible, `APP_LLM_BASE_URL`), целевой — vLLM Qwen3-8B-AWQ (ADR-001, дополнение) · Qdrant · Neo4j Community · PostgreSQL 16 · Traefik · OTel→Jaeger/Prometheus/Grafana · Langfuse (внешний docker-инстанс) · React SPA.
 - **Железо:** RTX 5070 Ti 16GB VRAM (Blackwell/sm_120 → нужен образ vLLM с CUDA ≥12.8), Windows + Docker Desktop (WSL2, GPU passthrough).
 - **Онтология графа (4 типа узлов, не усложнять):**
   - `(:Act {id, title, doc_number, date, status})`
@@ -156,11 +156,16 @@
 
 **Acceptance:** покрыты все критерии tasks.md (Deployment ✓ Data Flow ✓ trade-offs ✓ Security-by-Design ✓); диаграммы открываются в draw.io.
 
-### [ ] Этап 2. Инфраструктура docker-compose
+### [x] Этап 2. Инфраструктура docker-compose
 **Deliverables:** `infra/docker-compose.yml` (+override gpu, +observability), конфиги Traefik/Grafana provisioning, `.env.example`, smoke-скрипт.
 Сервисы: traefik, backend (заглушка `/health`), vllm (GPU), qdrant, neo4j, postgres, vault (dev-mode — хранение секретов по заданию), otel-collector, jaeger, prometheus, grafana. Langfuse подключается внешне по URL из `.env`. Образы — с официального Docker Hub (при блокировке переключаемся на зеркало одной переменной, см. ADR-011); версии фиксируются.
 **Acceptance:** `docker compose up -d` → все healthchecks green; UI Jaeger/Grafana/Neo4j Browser доступны через Traefik.
 **Тесты:** `scripts/smoke_infra.py` — проверка портов/health всех сервисов.
+
+> Примечание (по итогам выполнения): vLLM выведен из обязательного набора этапа 2 —
+> `docker-compose.gpu.yml` остаётся опциональным override'ом (целевой движок демо/нагрузки).
+> LLM-эндпоинт конфигурируется переменными `APP_LLM_BASE_URL/APP_LLM_MODEL`; в dev-режиме
+> используется LM Studio на хосте. См. ADR-001, раздел «Дополнение».
 
 ### [ ] Этап 3. Фундамент бэкенда
 **Deliverables:** app factory, pydantic-settings (fail-fast валидация `APP_*` конфига на старте), SQLAlchemy-модели (users, roles, sessions, audit_log), миграции (alembic или create_all для MVP), `POST /auth/login` (JWT), `GET /auth/me`, middleware: request-id/trace-correlation (`X-Trace-Id` входящий/эхо в ответ, `X-Request-Id`) + структурное JSON-логирование с инъекцией `trace_id`/`request_id` в каждую строку. Сид-скрипт 3 пользователей (viewer/analyst/admin), структура модулей из схемы выше. Настроить ruff + mypy + pre-commit + Makefile (`lint`, `test-*`) — далее это gate всех этапов.
