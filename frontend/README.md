@@ -73,12 +73,12 @@ make openapi-types     # регенерация src/lib/api-types.ts из docs/a
    отфильтрованы ещё на этапе выборки из Qdrant/Neo4j; qa_analyst видит и INTERNAL.
 4. `qa_view` получает 403 на любой `/admin/*`; qa_analyst тоже. Admin — 200.
 
-Тот же сценарий автоматизирован Postman-коллекцией `postman/graphrag.postman_collection.json`
-(18 запросов с ассертами, включая разбор SSE-чата) + окружение `postman/local.postman_environment.json`.
+Тот же сценарий автоматизирован E2E-коллекцией `tests/postman/graphrag.postman_collection.json`
+(запросы с ассертами, включая разбор SSE-чата) + окружение `tests/postman/env.local.json`.
 Запуск из Postman Runner по порядку либо:
 
 ```bash
-make postman-run   # npx newman run ... -e postman/local.postman_environment.json
+make test-postman   # scripts/run_postman.ps1|.sh: newman против http://api.localhost
 ```
 
 ## Как работают метки секретности

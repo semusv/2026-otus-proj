@@ -168,7 +168,8 @@ compose) · `gpu_slow` (LLM-as-a-Judge, этап 5+).
 Интеграционные тесты сами создают и удаляют свою БД — основную не трогают;
 ingestion-тесты используют отдельную коллекцию `chunks_test` и чистят граф после себя.
 Нужен запущенный стек: `docker compose -f infra/docker-compose.yml up -d postgres qdrant neo4j`.
-Postman/Newman-коллекция (auth + ingest) — `tests/postman/collection.json`.
+Postman/Newman E2E-коллекция — `tests/postman/graphrag.postman_collection.json`
+(gate этапа 9: `make test-postman`).
 
 ## Повседневные команды
 

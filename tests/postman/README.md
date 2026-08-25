@@ -1,26 +1,39 @@
-# Postman / Newman (этапы 3–9)
+# Postman / Newman (E2E, этапы 3–9)
 
-Коллекция ведётся в `tests/postman/collection.json`, окружение — `env.local.json`.
+Единая коллекция — `graphrag.postman_collection.json`, окружение — `env.local.json`.
 Источник правды по контракту — `docs/api/openapi.yaml` (экспорт из FastAPI:
 `make openapi-export`); при изменении эндпоинтов коллекция дополняется вручную
 по контракту.
 
-## Запуск через Newman
+## Состав коллекции
+
+| Папка | Что проверяет |
+|---|---|
+| `00-system` | `/health`, эхо `X-Trace-Id`/`X-Request-Id`, `/metrics` (семейства метрик) |
+| `10-auth` | логин admin, ошибки аутентификации (401 + коды), `/auth/me` |
+| `20-users` | управление учётками: создание viewer/analyst, 409/422, смена роли, эскалация → 403 |
+| `30-ingest` | статус ingestion (read-only), 401 анонима, 403 у viewer'а |
+| `40-chat-rbac` | чат non-stream/SSE, память диалога, ACL на цитатах, injection, чужая сессия |
+| `ingest-run` | **ОПЦИЯ**: запуск `POST /admin/ingest` (полный прогон корпуса, CPU 10–30 мин). В gate НЕ входит |
+
+## Запуск
 
 ```powershell
-npm install -g newman          # один раз
-newman run tests/postman/collection.json -e tests/postman/env.local.json
+make test-postman                                   # gate: newman против http://api.localhost (Traefik)
+powershell -File scripts/run_postman.ps1 -BaseUrl "http://127.0.0.1:8000"   # мимо Traefik
+sh scripts/run_postman.sh http://127.0.0.1:8000     # то же под sh
+INGEST_RUN=1 sh scripts/run_postman.sh              # + опциональный запуск ingestion
 ```
 
-Против Traefik: заменить `baseUrl` на `http://api.localhost`
-(переменная `baseUrlTraefik` в окружении).
+Exit-code newman'а — гейт: `0` = зелёный. Таймаут запроса — 180 c
+(чат-конвейер с LLM медленный, зависание не подвешивает прогон).
+JSON-отчёт прогона пишется в `scripts/load_test/results/` (вне git).
 
-## Сценарии этапа 3
+Предусловия: стек поднят (`docker compose up -d`), сидированы пользователи
+(`make seed-users`: viewer/viewer123, analyst/analyst123, admin/admin123),
+корpus загружен в Qdrant/Neo4j (иначе чат-проверки на цитаты упадут).
 
-1. Health (+ проверка эха X-Trace-Id)
-2. Login admin → токен сохраняется в переменную коллекции
-3. Login с неверным паролем → 401 invalid_credentials
-4. GET /auth/me по токену → role + clearances
-5. GET /auth/me без токена → 401 invalid_token
+## Нагрузочное тестирование (этап 9)
 
-На этапах 5–9 добавляются чат/RBAC/метрики; полный прогон — gate этапа 9.
+Отдельные скрипты: `scripts/run_load_test.ps1|.sh` (locust) и
+`scripts/load_test/bench_llm.py` (tokens/sec движка LLM). См. `docs/load-report.md`.
