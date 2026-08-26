@@ -87,7 +87,7 @@ openapi-types:
 postman-run: test-postman
 
 test-postman:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_postman.ps1
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_postman.ps1 $(POSTMAN_ARGS)
 
 load-test:
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_load_test.ps1
