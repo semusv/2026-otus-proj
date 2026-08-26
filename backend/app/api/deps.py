@@ -28,8 +28,11 @@ async def get_current_user(request: Request) -> User:
     db = request.app.state.db
     async with db.session_factory() as session:
         auth_session = await session.get(AuthSession, claims.jti)
-        expired = auth_session.expires_at <= datetime.now(UTC)
-        if auth_session is None or auth_session.revoked or expired:
+        if (
+            auth_session is None
+            or auth_session.revoked
+            or auth_session.expires_at <= datetime.now(UTC)
+        ):
             raise TokenInvalidError("Сессия недействительна или отозвана")
 
         user = (

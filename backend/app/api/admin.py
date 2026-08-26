@@ -19,13 +19,23 @@ from sqlalchemy.orm import joinedload
 
 from app.api.deps import audit_context, get_current_user
 from app.config import Settings
-from app.core.errors import ForbiddenError, IngestAlreadyRunningError, UserNotFoundError
+from app.core.errors import (
+    ForbiddenError,
+    IngestAlreadyRunningError,
+    LastAdminError,
+    UserNotFoundError,
+)
 from app.core.security import resolve_clearances
 from app.db.base import get_session
 from app.db.models import AuditLog, ChatMessage, ChatSession, Role, RoleName, User
-from app.db.users import create_user
+from app.db.users import (
+    create_user,
+    delete_user_cascade,
+    other_active_admin_exists,
+)
 from app.ingestion.pipeline import IngestProgress, run_ingestion
 from app.schemas.admin import (
+    DeleteUserResponse,
     IngestStartResponse,
     IngestStatusResponse,
     Neo4jStats,
@@ -36,6 +46,7 @@ from app.schemas.admin import (
     UserOut,
     UserRoleUpdate,
     UsersListResponse,
+    UserStatusUpdate,
 )
 
 logger = logging.getLogger("app.api.admin")
@@ -270,3 +281,128 @@ async def change_user_role(
     await session.commit()
     await session.refresh(target, attribute_names=["role"])
     return _user_out(target)
+
+
+async def _load_target(
+    session: AsyncSession, user_id: uuid.UUID
+) -> User:
+    target = (
+        await session.execute(select(User).options(joinedload(User.role)).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if target is None:
+        raise UserNotFoundError()
+    return target
+
+
+async def _ensure_not_last_admin(session: AsyncSession, target: User) -> None:
+    """Блокирует деактивацию/удаление последнего активного админа."""
+    if (
+        target.role.name == RoleName.ADMIN
+        and target.is_active
+        and not await other_active_admin_exists(session, target.id)
+    ):
+        raise LastAdminError()
+
+
+@router.patch(
+    "/users/{user_id}/status",
+    response_model=UserOut,
+    summary="Деактивировать/реактивировать учётную запись (мягкое отключение)",
+    responses={
+        403: {"description": "Не admin или попытка изменить себя"},
+        404: {"description": "Пользователь не найден"},
+        409: {"description": "Последний активный админ"},
+    },
+)
+async def set_user_status(
+    user_id: uuid.UUID,
+    payload: UserStatusUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserOut:
+    """Мягкое отключение: is_active=false блокирует вход (login → 401) и
+    инвалидирует существующие JWT (любой запрос → 401), история и аудит целы.
+    Реактивация возвращает доступ без создания новых сущностей."""
+    _require_admin(user)
+    if user.id == user_id:
+        raise ForbiddenError("Нельзя изменить статус собственной учётной записи")
+
+    target = await _load_target(session, user_id)
+    if payload.is_active is False:
+        await _ensure_not_last_admin(session, target)
+
+    old_state = target.is_active
+    target.is_active = payload.is_active
+    session.add(
+        AuditLog(
+            action="admin.user_status_changed",
+            user_id=user.id,
+            detail={
+                "target": target.username,
+                "old_is_active": old_state,
+                "new_is_active": payload.is_active,
+            },
+            **audit_context(),
+        )
+    )
+    await session.commit()
+    await session.refresh(target, attribute_names=["role"])
+    return _user_out(target)
+
+
+@router.delete(
+    "/users/{user_id}",
+    response_model=DeleteUserResponse,
+    summary="Удалить учётную запись (по умолчанию мягко — деактивация; ?hard=true — физически)",
+    responses={
+        403: {"description": "Не admin или попытка удалить себя"},
+        404: {"description": "Пользователь не найден"},
+        409: {"description": "Последний активный админ"},
+    },
+)
+async def delete_user(
+    user_id: uuid.UUID,
+    hard: bool = False,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> DeleteUserResponse:
+    """hard=false (дефолт): деактивация — вход заблокирован, история/аудит целы.
+    hard=true: физическое удаление строки users c чисткой FK-зависимостей
+    (chat_messages → chat_sessions → sessions) и обезличиванием audit_log
+    (user_id=NULL, события сохраняются). Qdrant/Neo4j не затрагиваются.
+    Защиты: нельзя удалить себя; нельзя удалить последнего активного админа.
+    Имя освобождается только при hard=true (при soft имя остаётся занятым)."""
+    _require_admin(user)
+    if user.id == user_id:
+        raise ForbiddenError("Нельзя удалить собственную учётную запись")
+
+    target = await _load_target(session, user_id)
+    username = target.username
+
+    if hard:
+        await _ensure_not_last_admin(session, target)
+        messages = await delete_user_cascade(session, target.id)
+        session.add(
+            AuditLog(
+                action="admin.user_deleted",
+                user_id=user.id,
+                detail={"target": username, "mode": "hard", "chat_messages_removed": messages},
+                **audit_context(),
+            )
+        )
+        await session.commit()
+        return DeleteUserResponse(user_id=str(user_id), username=username, mode="deleted")
+
+    await _ensure_not_last_admin(session, target)
+    if target.is_active:
+        target.is_active = False
+        session.add(
+            AuditLog(
+                action="admin.user_deleted",
+                user_id=user.id,
+                detail={"target": username, "mode": "soft_deactivate"},
+                **audit_context(),
+            )
+        )
+        await session.commit()
+    return DeleteUserResponse(user_id=str(user_id), username=username, mode="deactivated")

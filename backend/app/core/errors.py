@@ -62,6 +62,12 @@ class UserNotFoundError(AppError):
     message = "Пользователь не найден"
 
 
+class LastAdminError(AppError):
+    code = "last_admin"
+    status_code = 409
+    message = "Нельзя отключить или удалить последнего активного администратора"
+
+
 def _error_body(
     code: str,
     message: str,

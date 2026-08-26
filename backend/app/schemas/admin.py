@@ -101,3 +101,33 @@ class UserRoleUpdate(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [{"role": "analyst"}]})
 
     role: RoleLiteral
+
+
+class UserStatusUpdate(BaseModel):
+    """Деактивация/реактивация учётной записи (мягкое отключение доступа)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"is_active": False}],
+            "description": "Неактивный пользователь не может войти; существующие JWT отклоняются",
+        }
+    )
+
+    is_active: bool
+
+
+class DeleteUserResponse(BaseModel):
+    """Итог удаления учётной записи (DELETE /admin/users/{id}?hard=true|false)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"user_id": "...", "username": "qa_x", "mode": "deleted"},
+                {"user_id": "...", "username": "qa_x", "mode": "deactivated"},
+            ]
+        }
+    )
+
+    user_id: str
+    username: str
+    mode: Literal["deactivated", "deleted"]
