@@ -27,7 +27,7 @@ from app.core.errors import (
 )
 from app.core.security import resolve_clearances
 from app.db.base import get_session
-from app.db.models import AuditLog, ChatMessage, ChatSession, Role, RoleName, User
+from app.db.models import AuditLog, ChatMessage, ChatSession, IngestionRun, Role, RoleName, User
 from app.db.users import (
     create_user,
     delete_user_cascade,
@@ -83,6 +83,14 @@ async def start_ingest(
     settings: Settings = request.app.state.settings
     corpus_dir = Path(settings.ingest_corpus_dir)
     progress = IngestProgress()
+
+    db = request.app.state.db
+    async with db.session_factory() as session:
+        run = IngestionRun(state="running")
+        session.add(run)
+        await session.commit()
+        run_id = run.id
+
     state.update(
         {
             "state": "running",
@@ -90,20 +98,53 @@ async def start_ingest(
             "finished_at": None,
             "stats": None,
             "error": None,
-            # живой прогресс: объект читается в ingest_status (мутируется job'ом)
             "_progress": progress,
+            "_run_id": run_id,
         }
     )
 
     async def _job() -> None:
         try:
-            stats = await run_ingestion(settings, corpus_dir, progress=progress)
+            stats = await run_ingestion(
+                settings, corpus_dir,
+                progress=progress,
+                run_id=run_id,
+                session_factory=db.session_factory,
+            )
+            async with db.session_factory() as session:
+                from sqlalchemy import update as sa_update
+
+                await session.execute(
+                    sa_update(IngestionRun)
+                    .where(IngestionRun.id == run_id)
+                    .values(
+                        state="done",
+                        finished_at=datetime.now(UTC),
+                        stage="done",
+                        stats=asdict(stats),
+                    )
+                )
+                await session.commit()
             state.update(
                 {"state": "done", "finished_at": datetime.now(UTC), "stats": asdict(stats)}
             )
-        except Exception as exc:  # статус ошибки виден через /ingest/status
+        except Exception as exc:
             logger.exception("Ingestion упал")
             progress.stage = "error"
+            async with db.session_factory() as session:
+                from sqlalchemy import update as sa_update
+
+                await session.execute(
+                    sa_update(IngestionRun)
+                    .where(IngestionRun.id == run_id)
+                    .values(
+                        state="error",
+                        finished_at=datetime.now(UTC),
+                        stage="error",
+                        error=str(exc),
+                    )
+                )
+                await session.commit()
             state.update({"state": "error", "finished_at": datetime.now(UTC), "error": str(exc)})
 
     request.app.state.ingest_task = asyncio.create_task(_job())
@@ -117,19 +158,46 @@ async def start_ingest(
     responses={403: {"description": "Не admin"}},
 )
 async def ingest_status(
-    request: Request, user: User = Depends(get_current_user)
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> IngestStatusResponse:
     _require_admin(user)
+
+    # Если сейчас идёт прогон — берём live-прогресс из app.state
     state = dict(_state(request.app.state))
-    progress = state.pop("_progress", None)
-    if isinstance(progress, IngestProgress):
-        state.update(
-            stage=progress.stage,
-            files_done=progress.files_done,
-            files_total=progress.files_total,
-            chunks_done=progress.chunks_done,
+    if state.get("state") == "running":
+        progress = state.pop("_progress", None)
+        if isinstance(progress, IngestProgress):
+            state.update(
+                stage=progress.stage,
+                files_done=progress.files_done,
+                files_total=progress.files_total,
+                chunks_done=progress.chunks_done,
+            )
+        return IngestStatusResponse.model_validate(state)
+
+    # Иначе — читаем последний прогон из БД
+    from sqlalchemy import select as sa_select
+
+    row = (
+        await session.execute(
+            sa_select(IngestionRun).order_by(IngestionRun.started_at.desc()).limit(1)
         )
-    return IngestStatusResponse.model_validate(state)
+    ).scalar_one_or_none()
+    if row is None:
+        return IngestStatusResponse(state="idle")
+    return IngestStatusResponse(
+        state=row.state,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        stats=row.stats,
+        error=row.error,
+        stage=row.stage,
+        files_done=row.files_done,
+        files_total=row.files_total,
+        chunks_done=row.chunks_done,
+    )
 
 
 @router.get(

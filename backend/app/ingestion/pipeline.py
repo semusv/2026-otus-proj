@@ -10,10 +10,12 @@
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
 from app.ingestion.chunker import chunk_act
@@ -55,6 +57,24 @@ class IngestProgress:
     chunks_done: int = 0
 
 
+async def _persist(
+    session_factory: async_sessionmaker | None,
+    run_id: uuid.UUID | None,
+    **fields: object,
+) -> None:
+    """Записать прогресс/статус в ingestion_runs (если переданы run_id + session_factory)."""
+    if session_factory is None or run_id is None:
+        return
+    from sqlalchemy import update
+
+    from app.db.models import IngestionRun
+
+    async with session_factory() as session:
+        stmt = update(IngestionRun).where(IngestionRun.id == run_id).values(**fields)
+        await session.execute(stmt)
+        await session.commit()
+
+
 async def run_ingestion(
     settings: Settings,
     corpus_dir: Path,
@@ -62,12 +82,15 @@ async def run_ingestion(
     extract_concepts: bool | None = None,
     embedder: EmbeddingBackend | None = None,
     progress: IngestProgress | None = None,
+    run_id: uuid.UUID | None = None,
+    session_factory: async_sessionmaker | None = None,
 ) -> IngestStats:
     """Полный прогон ingestion по каталогу XML-файлов.
 
     ``embedder`` - точка расширения для тестов (стаб с детерминированными
     векторами); по умолчанию создаётся реальный bge-m3 (ADR-009).
     ``progress`` - необязательный объект живого прогресса для API-статуса.
+    ``run_id`` / ``session_factory`` - опциональная персистентность в ingestion_runs.
     """
     stats = IngestStats()
     do_concepts = (
@@ -83,6 +106,7 @@ async def run_ingestion(
 
     if progress is not None:
         progress.stage, progress.files_done, progress.files_total = "parse", 0, len(xml_files)
+    await _persist(session_factory, run_id, stage="parse", files_done=0, files_total=len(xml_files))
     logger.info(
         "Ingestion запущен: файлов=%d, concepts=%s, корпус=%s",
         len(xml_files),
@@ -101,6 +125,7 @@ async def run_ingestion(
     corpus_ids = {act.id for act in acts}
     if progress is not None:
         progress.files_done = stats.acts_parsed + len(stats.parse_errors)
+    await _persist(session_factory, run_id, files_done=stats.acts_parsed + len(stats.parse_errors))
     logger.info(
         "Парсинг завершён: актов=%d, ошибок разбора=%d",
         stats.acts_parsed,
@@ -125,6 +150,7 @@ async def run_ingestion(
         # только в потоке, иначе блокируем event loop и API перестаёт отвечать
         if progress is not None:
             progress.stage = "model"
+        await _persist(session_factory, run_id, stage="model")
         logger.info("Загрузка модели эмбеддингов (%s)...", settings.embedding_model)
         dim = await asyncio.to_thread(lambda: embedder.dim)
         logger.info("Модель готова (dim=%d), проверка коллекции/схемы", dim)
@@ -204,6 +230,11 @@ async def run_ingestion(
                 progress.chunks_done = stats.chunks_written
             percent = idx * 100 // total_acts
             if percent >= next_milestone * 10 or idx == total_acts:
+                await _persist(
+                    session_factory, run_id,
+                    stage="processing", files_done=idx, chunks_done=stats.chunks_written,
+                )
+            if percent >= next_milestone * 10 or idx == total_acts:
                 logger.info(
                     "Прогресс %d%%: актов %d/%d, чанков всего=%d",
                     min(percent, 100),
@@ -217,6 +248,7 @@ async def run_ingestion(
         await neo4j.close()
         if progress is not None:
             progress.stage = "done"
+        await _persist(session_factory, run_id, stage="done")
 
     logger.info(
         "Ingestion завершён: актов=%d, чанков=%d, concepts=%d, ошибок парсинга=%d",
