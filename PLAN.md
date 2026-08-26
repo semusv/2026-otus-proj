@@ -705,7 +705,7 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 - расплывчатый ответ конвейера «degraded» ≠ сбой: различать в ассертах
   (`status=ok ⇒ answer непустой`, иначе допустим degraded/empty).
 
-### [ ] Этап 10. Minikube (последний этап)
+### [x] Этап 10. Minikube (последний этап)
 **Deliverables:** `infra/helm/graphrag/` — Helm chart: Deployments (backend, frontend, postgres, qdrant, neo4j, vault), Services, ConfigMap + секреты, Ingress, PVC (pg/qdrant/neo4j/hf-cache/corpus), init-Job заливки корпуса; `scripts/k8s_up|down|status.ps1`; `docs/minikube-deployment.md` (runbook «с нуля», повседневный запуск, troubleshooting). Здесь же снимается видео-демо.
 **Acceptance:** весь флоу работает в minikube; тот же newman проходит против ingress-host.
 **Тесты:** newman против minikube.
@@ -768,52 +768,88 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
 Чек-лист выполнения:
 
 **A. Документация**
-- [ ] решения + чек-лист этапа 10 в PLAN.md (этот блок)
-- [ ] ADR-010 дополнение: nginx ingress вместо Traefik-in-cluster; Vault-wired вместо
+- [x] решения + чек-лист этапа 10 в PLAN.md (этот блок)
+- [x] ADR-010 дополнение: nginx ingress вместо Traefik-in-cluster; Vault-wired вместо
       K8s-Secret-only; Langfuse/observability вне кластера; LLM через host.minikube.internal
 
 **B. Подготовка окружения**
-- [ ] остановлен compose-проект graphrag (core + observability профили), Langfuse работает
-- [ ] baseline docker stats зафиксирован
-- [ ] minikube profile запущен с капами (--memory=12288 --cpus=6), addons ingress+metrics-server
-- [ ] kubectl top nodes/pods работает (metrics-server)
-- [ ] образы загружены: minikube image load (backend/frontend/neo4j/qdrant/postgres)
+- [x] остановлен compose-проект graphrag (core + observability профили), Langfuse работает
+- [x] baseline docker stats зафиксирован
+- [x] minikube profile запущен с капами (--memory=12288 --cpus=6), addons ingress+metrics-server
+- [x] kubectl top nodes/pods работает (metrics-server)
+- [x] образы загружены: minikube image load (backend/frontend/neo4j/qdrant/postgres)
 
 **C. Helm chart infra/helm/graphrag/**
-- [ ] Chart.yaml + values.yaml (плоский, прокомментированный) + secrets.yaml.example
-- [ ] vault: Deployment (dev-mode) + Service + seed-Job (KV secret/graphrag/app)
-- [ ] backend: initContainer vault_fetch → shared emptyDir → source secrets.env; probes /health;
+- [x] Chart.yaml + values.yaml (плоский, прокомментированный) + secrets.yaml.example
+- [x] vault: Deployment (dev-mode) + Service + seed-Job (KV secret/graphrag/app)
+- [x] backend: initContainer vault_fetch → shared emptyDir → source secrets.env; probes /health;
       PVC hf-cache (/hf-cache) + corpus-pvc ro (/data/corpus); ресурсы 2Gi/4Gi
-- [ ] postgres/qdrant/neo4j: Deployment + Service + PVC, лимиты, healthchecks
+- [x] postgres/qdrant/neo4j: Deployment + Service + PVC, лимиты, healthchecks
       (neo4j: heap/pagecache env-капы)
-- [ ] frontend: Deployment + Service (лимит 128Mi)
-- [ ] corpus-init Job: alpine+corpus → cp на corpus-pvc
-- [ ] Ingress catch-all по IP ноды (+ аннотации SSE) ; NodePort-fallback сервис бэкенда
-- [ ] helm install green: все деплои Available, PVC Bound
+- [x] frontend: Deployment + Service (лимит 128Mi)
+- [x] corpus-init Job: alpine+corpus → cp на corpus-pvc
+- [x] Ingress catch-all по IP ноды (+ аннотации SSE) ; NodePort-fallback сервис бэкенда
+- [x] helm install green: все деплои Available, PVC Bound
 
 **D. Приёмка данных и связности**
-- [ ] debug-pod curl: LM Studio host.minikube.internal:1234 ✓; Langfuse :3300 ✓
-- [ ] сид пользователей (kubectl exec scripts/seed_users.py)
-- [ ] прогрев HF-кэша (bge-m3 + reranker в hf-cache PVC)
-- [ ] ingestion corpus_test через POST /admin/ingest (детерминированный режим), статус done,
+- [x] debug-pod curl: LM Studio host.minikube.internal:1234 ✓; Langfuse :3300 ✓
+- [x] сид пользователей (kubectl exec scripts/seed_users.py)
+- [x] прогрев HF-кэша (bge-m3 + reranker в hf-cache PVC)
+- [x] ingestion corpus_test через POST /admin/ingest (детерминированный режим), статус done,
       /admin/stats показывает данные
 
 **E. Newman gate**
-- [ ] полный прогон коллекции против http://192.168.49.2 (run_postman.ps1 -BaseUrl) — 0 fail
-- [ ] чат SSE через ingress работает (стрим не буферизуется)
+- [x] полный прогон коллекции против http://192.168.49.2 (run_postman.ps1 -BaseUrl) — 0 fail
+- [x] чат SSE через ingress работает (стрим не буферизуется)
 
 **F. Документация эксплуатации + завершение**
-- [ ] docs/minikube-deployment.md: схема (что где крутится, сетевые пути pod→host.minikube.internal),
+- [x] docs/minikube-deployment.md: схема (что где крутится, сетевые пути pod→host.minikube.internal),
       бюджет ресурсов, runbook «с нуля» (каждая команда с пояснением), runbook «повседневный»
       (start/stop дня, переключение compose↔k8s, полный teardown), troubleshooting
       (firewall, OOMKilled, медленный первый чат/HF, ingress 404, vault seed)
-- [ ] scripts/k8s_up.ps1 | k8s_down.ps1 | k8s_status.ps1 (повседневный запуск одной командой)
-- [ ] README (root или infra): блок «Minikube» — быстрый старт 3 команды + ссылка на runbook
-- [ ] отчёт по ресурсам (kubectl top + docker stats до/во время/после ingestion и newman)
-- [ ] коммиты подшагами `stage-10(...)`: docs → chart → scripts → fixes → tests; тег `stage/10`
+- [x] scripts/k8s_up.ps1 | k8s_down.ps1 | k8s_status.ps1 (повседневный запуск одной командой)
+- [x] README (root или infra): блок «Minikube» — быстрый старт 3 команды + ссылка на runbook
+- [x] отчёт по ресурсам (kubectl top + docker stats до/во время/после ingestion и newman)
+- [x] коммиты подшагами `stage-10(...)`: docs → chart → scripts → fixes → tests; тег `stage/10`
 
 Откат: `helm uninstall graphrag -n graphrag && minikube delete -p minikube`;
 compose-стек возвращается `docker compose up -d` (данные volumes не тронуты).
+
+**Acceptance (зафиксировано):** весь флоу работает в minikube ✓ — ingress→backend/frontend,
+Vault-wired секреты, ingestion 2331 чанка, трейс чата 47 спанов в Jaeger
+(guardrail_in→planner→tools→fusion_rerank→generate→evaluate→guardrail_out + llm + SQL),
+Newman gate против кластера **36 запросов / 55 assertions / 0 fail**
+(`-BaseUrl http://127.0.0.1:8080`) ✓.
+
+Уроки этапа (учесть далее):
+- **Старый профиль minikube был ограничен 2 CPU на уровне docker-cgroup** (`cpu.max=200000/100000`
+  внутри ноды; kubelet при этом рапортует все ядра хоста). Симптом: под с limits.cpu=10 ест ~1.7
+  ядра, ингестион «вечный». Лимиты профиля меняются ТОЛЬКО пересозданием: `minikube start`
+  пишет "You cannot change the memory/cpus" и молча продолжает со старыми. Решение - новый
+  профиль `graphrag --cpus=8 --memory=12288`, старый остановлен (учебные стенды пользователя
+  сохранены scale=0). Проверка ресурсного капа: `minikube -p <name> ssh "cat /sys/fs/cgroup/cpu.max"`.
+- **IP ноды minikube (192.168.49.x) не маршрутизируется из Windows** при docker-driver:
+  kubeconfig ходит через localhost-прокси Docker Desktop. NodePort/IP-доступ извне невозможен;
+  вход - port-forward к ingress-контроллеру (дефолт) или `minikube tunnel` + hosts (доменный
+  режим за флагом ingress.hosts.enabled).
+- **storageClassName: ""** в PVC = ЯВНОЕ отключение dynamic provisioning (PVC Pending навсегда).
+  Поле нужно ОТСУТСТВИЕ для default StorageClass.
+- **Neo4j vs k8s service-links**: env вида NEO4J_PORT_7687_TCP_PORT (инжект по имени сервиса)
+  ломает strict-validation Neo4j → `NEO4J_server_config_strict__validation_enabled=false`.
+- **Sourced env-файл без export**: переменные остаются shell-local и НЕ наследуются детьми
+  (alembic/uvicorn) → vault_fetch пишет `export KEY='value'`.
+- **PowerShell 5.1 UTF-8 BOM**: Set-Content -Encoding utf8 пишет BOM; Grafana молча отбрасывает
+  такой JSON-дашборд. Писать через [IO.File]::WriteAllText с UTF8Encoding($false).
+- **prometheus_client Counter с labels не экспортируется до первого события** - пустая панель
+  Grafana может быть нормой до первого sanitize/refuse.
+- **minikube image load**: падает на части образов (manifest-cache bug), копит кэш на C:
+  (~размер образа!) и при прерывании оставляет мусор; надёжные пути - `docker push` в Hub +
+  pull внутри ноды, либо docker save -> minikube cp -> ssh docker load.
+- Ингестион corpus_test (2331 чанк): **20м48с на 8 ядрах** (профиль graphrag); на 2-ядерном
+  капе не завершался и за 80+ минут. Ресурсы после прогрева: backend ~5.3GiB/6Gi лимит,
+  нода целиком 6.0/12GiB VM.
+- Первый newman-прогон поймал плавающий дегрейд LM Studio на одном чате (41.6с, пустой ответ)
+  - перепрогон зелёный; соответствует уроку этапа 9 о ретраях/повторах gate.
 
 ### [ ] Этап 11. Финализация
 **Deliverables:** README (быстрый старт compose + minikube), видео-скрипт 5–7 мин (граф в Neo4j Browser, трейсы Jaeger/Langfuse, RBAC-демо), финальный полный прогон всех тестов, чистка `.env.example` от секретов.
