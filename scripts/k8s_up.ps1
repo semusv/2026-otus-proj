@@ -33,7 +33,9 @@ kubectl -n ingress-nginx wait --for=condition=Available deploy/ingress-nginx-con
 # Webhook endpoint может быть не готов сразу после Available - ждём явно
 $webhookReady = $false
 for ($i = 1; $i -le 12; $i++) {
-    $ep = kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>$null
+    try {
+        $ep = kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>$null
+    } catch { $ep = $null }
     if ($ep) { $webhookReady = $true; break }
     "webhook endpoint ещё не готов ($i/12), ждём 5с..."
     Start-Sleep 5
