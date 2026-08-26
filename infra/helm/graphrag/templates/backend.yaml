@@ -1,0 +1,145 @@
+{{- $vaultEnabled := .Values.vault.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: backend
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # hf-cache/corpus PVC RWO
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        {{- include "graphrag.labels" . | nindent 8 }}
+    spec:
+      {{- if $vaultEnabled }}
+      # initContainer: выгружает APP_* секреты из Vault в env-файл
+      # (модуль app/infra/vault_fetch.py, ретраи пока vault/seed сходятся)
+      initContainers:
+        - name: vault-fetch
+          image: {{ .Values.image.backend }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["python", "-m", "app.infra.vault_fetch", "--out", "/config/secrets.env"]
+          env:
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.address | quote }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: VAULT_ROOT_TOKEN
+            - name: VAULT_KV_PATH
+              value: {{ .Values.vault.kvPath | quote }}
+          volumeMounts:
+            - name: app-secrets
+              mountPath: /config
+          resources:
+            requests: { memory: 128Mi, cpu: 100m }
+            limits: { memory: 256Mi, cpu: 500m }
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ .Values.image.backend }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: backend-config
+          env:
+            - name: APP_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: POSTGRES_PASSWORD
+            - name: APP_NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: NEO4J_PASSWORD
+            {{- if not $vaultEnabled }}
+            - name: APP_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: APP_JWT_SECRET
+            - name: APP_LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: APP_LANGFUSE_PUBLIC_KEY
+            - name: APP_LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: APP_LANGFUSE_SECRET_KEY
+            {{- end }}
+          ports:
+            - containerPort: 8000
+          resources:
+            {{- toYaml .Values.resources.backend | nindent 12 }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /hf-cache
+            - name: corpus
+              mountPath: {{ .Values.app.ingestCorpusDir }}
+              readOnly: true
+            {{- if $vaultEnabled }}
+            - name: app-secrets
+              mountPath: /config
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12   # alembic + старт uvicorn
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          {{- if $vaultEnabled }}
+          command:
+            - sh
+            - -c
+            - ". /config/secrets.env && alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+          {{- else }}
+          command:
+            - sh
+            - -c
+            - "alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+          {{- end }}
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: hf-cache
+        - name: corpus
+          persistentVolumeClaim:
+            claimName: corpus-pvc
+        {{- if $vaultEnabled }}
+        - name: app-secrets
+          emptyDir:
+            medium: Memory   # секреты только в tmpfs пода
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000

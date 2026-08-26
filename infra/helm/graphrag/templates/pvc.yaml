@@ -1,0 +1,68 @@
+{{/*
+PVC без storageClassName -> default StorageClass кластера (minikube: standard/hostpath).
+Кастомный класс при необходимости добавить строкой `storageClassName: <name>` в каждый spec.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storage.postgres }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qdrant-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storage.qdrant }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storage.neo4jData }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hf-cache
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storage.hfCache }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: corpus-pvc
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storage.corpus }}

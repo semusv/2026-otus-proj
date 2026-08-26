@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: postgres
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # PVC RWO - один под на ноде
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        {{- include "graphrag.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.image.postgres }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              value: graphrag
+            - name: POSTGRES_DB
+              value: graphrag
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          resources:
+            {{- toYaml .Values.resources.postgres | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: shm
+              mountPath: /dev/shm
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U graphrag -d graphrag"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U graphrag -d graphrag"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: pg-data
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi   # аналог compose shm_size: 256mb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: qdrant
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+        {{- include "graphrag.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: qdrant
+          image: {{ .Values.image.qdrant }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: 6333
+          resources:
+            {{- toYaml .Values.resources.qdrant | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /qdrant/storage
+          readinessProbe:
+            tcpSocket:
+              port: 6333
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 6333
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: qdrant-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: qdrant
+  ports:
+    - port: 6333
+      targetPort: 6333

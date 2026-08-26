@@ -1,0 +1,6 @@
+apiVersion: v2
+name: graphrag
+description: GraphRAG платформа корпоративных знаний (этап 10, minikube)
+type: application
+version: 0.1.0
+appVersion: "stage10"

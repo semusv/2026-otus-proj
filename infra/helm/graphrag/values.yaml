@@ -1,0 +1,97 @@
+# ============================================================
+# GraphRAG Helm values (этап 10, minikube)
+#
+# Принципы:
+#  - плоская структура, дефолты = зеркало infra/.env.example;
+#  - секреты НЕ здесь: они передаются отдельным файлом
+#    `secrets.yaml` (в .gitignore; шаблон - secrets.yaml.example);
+#  - образы публикуются в Docker Hub (vvsem/*) и скачиваются kubelet'ом.
+# ============================================================
+
+namespace: graphrag
+
+# --- Образы (пины; backend/frontend собираются из этого репо и пушатся в Hub) ---
+image:
+  backend: vvsem/graphrag-backend:stage10
+  frontend: vvsem/graphrag-frontend:stage10
+  corpusLoader: vvsem/graphrag-corpus:stage10   # alpine + корпус XML (3.2MB)
+  postgres: postgres:16-alpine
+  qdrant: qdrant/qdrant:v1.19.0
+  neo4j: neo4j:5.26.30-community
+  vault: hashicorp/vault:2.0.4
+imagePullPolicy: IfNotPresent
+
+# --- Ресурсная рамка (бюджет подов <=8Gi из 12Gi VM; см. docs/minikube-deployment.md) ---
+resources:
+  backend:
+    requests: { memory: 2Gi, cpu: 500m }
+    limits: { memory: 4Gi, cpu: "4" }      # bge-m3 + reranker in-process ~4.5GB при прогреве
+  postgres:
+    requests: { memory: 256Mi, cpu: 100m }
+    limits: { memory: 512Mi, cpu: "1" }
+  qdrant:
+    requests: { memory: 512Mi, cpu: 100m }
+    limits: { memory: 1Gi, cpu: "2" }
+  neo4j:
+    requests: { memory: 512Mi, cpu: 100m }
+    limits: { memory: 2Gi, cpu: "2" }
+  frontend:
+    requests: { memory: 64Mi, cpu: 10m }
+    limits: { memory: 128Mi, cpu: 200m }
+  vault:
+    requests: { memory: 32Mi, cpu: 20m }
+    limits: { memory: 64Mi, cpu: 200m }
+
+# --- Постоянные тома (class: null = default StorageClass minikube 'standard') ---
+storage:
+  class: null
+  postgres: 2Gi
+  qdrant: 2Gi
+  neo4jData: 2Gi
+  hfCache: 10Gi        # кэш HuggingFace (bge-m3 + reranker ~4.5GB); переживает рестарты пода
+  corpus: 256Mi        # XML корпуса, заливается init-Job'ом
+
+# --- Конфиг приложения (не-секретный; APP_* -> ConfigMap) ---
+app:
+  logLevel: INFO
+  env: dev
+  jwtTtlMinutes: "30"
+  # LLM - LM Studio на хосте Windows (vpnkit-прокси docker-desktop);
+  # модель должна совпадать с запущенной в LM Studio (см. infra/.env)
+  llmBaseUrl: http://host.minikube.internal:1234/v1
+  llmApiKey: lm-studio
+  llmModel: qwen3.5-2b
+  guardrailUseLlm: "true"
+  # Наблюдаемость: Jaeger/Prometheus остаются стеком compose (в кластер не дублируем);
+  # /metrics бэкенда работает всегда, трейсы выключены до включения коллектора
+  tracingEnabled: "false"
+  # Langfuse остаётся self-hosted стеком в Docker НА ХОСТЕ (порт 3300);
+  # бэкенд отказоустойчив к его недоступности (таймауты + best-effort flush)
+  langfuseEnabled: "true"
+  langfuseUrl: http://host.minikube.internal:3300
+  ingestCorpusDir: /data/corpus
+  ingestExtractConcepts: "false"   # детерминированный режим для API-прогона ingestion
+
+# --- Vault (требование задания: управление секретами через Vault) ---
+vault:
+  enabled: true
+  address: http://vault:8200
+  kvPath: secret/graphrag/app      # KV v2; seed-Job кладёт APP_*-ключи сюда,
+                                   # initContainer backend'а выгружает их в /config/secrets.env
+  # Прод-эволюция (вне MVP): вместо dev-root-token - AppRole или K8s-auth.
+
+# --- Ingress (catch-all; вход через kubectl port-forward svc/ingress-nginx-controller 8080:80) ---
+ingress:
+  enabled: true
+
+# --- Секреты ---
+# Заполняются файлом secrets.yaml (копия secrets.yaml.example):
+#   helm install ... --values secrets.yaml
+# Здесь только заглушка со схемой ключей.
+secrets: {}
+  # postgresPassword: ...
+  # neo4jPassword: ...
+  # jwtSecret: ...
+  # langfusePublicKey: ...
+  # langfuseSecretKey: ...
+  # vaultRootToken: ...

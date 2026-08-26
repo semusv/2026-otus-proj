@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: neo4j
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+        {{- include "graphrag.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: neo4j
+          image: {{ .Values.image.neo4j }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: NEO4J_PASSWORD
+            # $()-подстановка k8s: ссылка на переменную, объявленную ВЫШЕ в этом же контейнере
+            - name: NEO4J_AUTH
+              value: "neo4j/$(NEO4J_PASSWORD)"
+            # Капы памяти (лимит пода 2Gi): heap 1G + pagecache 512M,
+            # иначе JVM съест лимит и pod уйдёт OOMKilled
+            - name: NEO4J_server_memory_heap_initial__size
+              value: 512m
+            - name: NEO4J_server_memory_heap_max__size
+              value: 1G
+            - name: NEO4J_server_memory_pagecache_size
+              value: 512m
+            # k8s инжектит service-link env вида NEO4J_PORT_7687_TCP_PORT (по имени
+            # сервиса), entrypoint Neo4j трактует их как настройки и strict-validation
+            # падает. Отключаем валидацию (стандартный обход для k8s)
+            - name: NEO4J_server_config_strict__validation_enabled
+              value: "false"
+          ports:
+            - containerPort: 7474   # HTTP (Browser)
+            - containerPort: 7687   # Bolt
+          resources:
+            {{- toYaml .Values.resources.neo4j | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: 7687
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 18   # neo4j стартует ~60-90s
+          livenessProbe:
+            tcpSocket:
+              port: 7687
+            initialDelaySeconds: 120
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: neo4j-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: neo4j
+  ports:
+    - name: http
+      port: 7474
+      targetPort: 7474
+    - name: bolt
+      port: 7687
+      targetPort: 7687

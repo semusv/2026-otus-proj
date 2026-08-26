@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: vault
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+        {{- include "graphrag.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: vault
+          image: {{ .Values.image.vault }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # Dev-mode (аналог compose-этапа 2): незапечатан всегда, данные in-memory.
+          # Источник правды для KV - seed-Job (идемпотентно при каждом install/upgrade)
+          args:
+            [
+              "server",
+              "-dev",
+              "-dev-root-token-id=$(VAULT_ROOT_TOKEN)",
+              "-dev-listen-address=0.0.0.0:8200",
+            ]
+          env:
+            - name: VAULT_ROOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: VAULT_ROOT_TOKEN
+          ports:
+            - containerPort: 8200
+          resources:
+            {{- toYaml .Values.resources.vault | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standby-ok=true
+              port: 8200
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      # cap_add IPC_LOCK из compose не нужен: dev-mode без mlock
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: vault
+  ports:
+    - port: 8200
+      targetPort: 8200
+{{- if .Values.vault.enabled }}
+---
+# Seed-Job: кладёт APP_*-секреты в KV. Ретраит, пока vault не готов;
+# checksum-аннотация пересоздаёт Job при изменении секретов в secrets.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-seed
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+  annotations:
+    graphrag/secrets-checksum: {{ include "graphrag.secretsChecksum" . }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: vault-seed
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: {{ .Values.image.vault }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.address | quote }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: VAULT_ROOT_TOKEN
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: APP_JWT_SECRET
+            - name: LF_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: APP_LANGFUSE_PUBLIC_KEY
+            - name: LF_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphrag-secrets
+                  key: APP_LANGFUSE_SECRET_KEY
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              i=0
+              until vault kv put {{ .Values.vault.kvPath }} \
+                  APP_JWT_SECRET="$JWT_SECRET" \
+                  APP_LANGFUSE_PUBLIC_KEY="$LF_PUBLIC_KEY" \
+                  APP_LANGFUSE_SECRET_KEY="$LF_SECRET_KEY" >/dev/null; do
+                i=$((i+1))
+                if [ "$i" -ge 24 ]; then echo "vault недоступен после $i попыток"; exit 1; fi
+                sleep 5
+              done
+              echo "vault-seed: секреты записаны в {{ .Values.vault.kvPath }}"
+{{- end }}

@@ -1,0 +1,29 @@
+# Заливка корпуса XML (corpus_test, ~3.2MB) из мини-образа на PVC.
+# Backend монтирует тот же PVC read-only в /data/corpus (APP_INGEST_CORPUS_DIR).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: corpus-init
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: corpus-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: copy
+          image: {{ .Values.image.corpusLoader }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /corpus/* /data/corpus/ && echo файлов: $(ls /data/corpus | wc -l)"]
+          volumeMounts:
+            - name: corpus
+              mountPath: /data/corpus
+      volumes:
+        - name: corpus
+          persistentVolumeClaim:
+            claimName: corpus-pvc

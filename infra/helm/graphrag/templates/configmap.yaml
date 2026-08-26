@@ -1,0 +1,31 @@
+{{/*
+Namespace создаётся флагом `helm install --create-namespace -n {{ .Values.namespace }}`.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "graphrag.labels" . | nindent 4 }}
+data:
+  APP_ENV: {{ .Values.app.env | quote }}
+  APP_LOG_LEVEL: {{ .Values.app.logLevel | quote }}
+  APP_JWT_TTL_MINUTES: {{ .Values.app.jwtTtlMinutes | quote }}
+  APP_PG_HOST: postgres
+  APP_PG_PORT: "5432"
+  APP_PG_USER: graphrag
+  APP_PG_DB: graphrag
+  APP_QDRANT_URL: http://qdrant:6333
+  APP_NEO4J_URI: bolt://neo4j:7687
+  APP_NEO4J_USER: neo4j
+  APP_LLM_BASE_URL: {{ .Values.app.llmBaseUrl | quote }}
+  APP_LLM_API_KEY: {{ .Values.app.llmApiKey | quote }}
+  APP_LLM_MODEL: {{ .Values.app.llmModel | quote }}
+  APP_INGEST_CORPUS_DIR: {{ .Values.app.ingestCorpusDir | quote }}
+  APP_INGEST_EXTRACT_CONCEPTS: {{ .Values.app.ingestExtractConcepts | quote }}
+  APP_GUARDRAIL_USE_LLM: {{ .Values.app.guardrailUseLlm | quote }}
+  APP_TRACING_ENABLED: {{ .Values.app.tracingEnabled | quote }}
+  APP_LANGFUSE_ENABLED: {{ .Values.app.langfuseEnabled | quote }}
+  APP_LANGFUSE_URL: {{ .Values.app.langfuseUrl | quote }}
+  HF_HOME: /hf-cache/huggingface
