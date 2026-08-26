@@ -68,6 +68,12 @@ class LastAdminError(AppError):
     message = "Нельзя отключить или удалить последнего активного администратора"
 
 
+class ActNotFoundError(AppError):
+    code = "act_not_found"
+    status_code = 404
+    message = "Акт не найден"
+
+
 def _error_body(
     code: str,
     message: str,

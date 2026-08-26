@@ -106,6 +106,7 @@ vault kv put secret/graphrag/app \
     "==> scale backend=1 (секреты в Vault готовы)"
     kubectl -n graphrag scale deploy/backend --replicas=1
     kubectl -n graphrag wait --for=condition=Available deploy/backend --timeout=300s
+    kubectl -n graphrag rollout restart deployment/backend
 }
 
 # 3) Port-forward ingress -> localhost:8080 (фоновый процесс)
