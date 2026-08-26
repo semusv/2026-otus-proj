@@ -155,6 +155,51 @@ minikube -p minikube stop
 
 UI для демо: `http://localhost:8080/` (SPA), Swagger: `http://localhost:8080/docs`.
 
+### 5.1. Открыть приложение в браузере
+
+IP ноды minikube из Windows не маршрутизируется (docker-driver живёт внутри WSL),
+поэтому есть два способа:
+
+**Способ А — port-forward (дефолт, без прав администратора):**
+
+```powershell
+Start-Process kubectl -ArgumentList '-n','ingress-nginx','port-forward',
+    'svc/ingress-nginx-controller','8080:80' -WindowStyle Hidden
+# браузер:
+#   http://localhost:8080        - SPA (логин admin/admin123)
+#   http://localhost:8080/docs   - Swagger UI
+```
+
+`make k8s-up` поднимает этот port-forward автоматически. Работает через тот же
+ingress (path-routing и SSE-аннотации активны), просто на другом порту.
+
+**Способ Б — домены через `minikube tunnel` (красивые URL, UAC один раз):**
+
+```powershell
+# 1) Включить именованные хосты ingress
+helm upgrade graphrag infra/helm/graphrag -n graphrag `
+     -f infra/helm/graphrag/values.yaml -f infra/helm/graphrag/secrets.yaml `
+     --set ingress.hosts.enabled=true
+
+# 2) Разовая запись в hosts (PowerShell ЗАПУЩЕН ОТ АДМИНИСТРАТОРА)
+$ip = kubectl get nodes -o custom-columns=":.status.addresses[0].address"
+Add-Content "$env:SystemRoot\System32\drivers\etc\hosts" "$ip graphrag.local api.graphrag.local"
+
+# 3) Туннель (держать запущенным; при старте один раз спросит UAC -
+#    добавляет маршрут Windows до сервисной сети кластера)
+minikube -p minikube tunnel
+
+# 4) Браузер:
+#    http://graphrag.local      - SPA
+#    http://api.graphrag.local/docs - Swagger
+```
+
+Как это работает: tunnel делает service-CIDR кластера маршрутизируемым с хоста
+и отдаёт ingress-контроллеру адрес 127.0.0.1:80; домены резолвит запись в hosts.
+Останов туннеля (Ctrl+C) возвращает всё к способу А; флаг
+`--set ingress.hosts.enabled=false` — к catch-all-режиму.
+Способы А и Б можно совмещать (port-forward на 8080 живёт независимо).
+
 ## 6. Данные и полный teardown
 
 Персистентность: PVC pg-data / qdrant-data / neo4j-data / hf-cache / corpus-pvc

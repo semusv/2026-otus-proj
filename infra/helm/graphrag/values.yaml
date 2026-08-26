@@ -80,9 +80,22 @@ vault:
                                    # initContainer backend'а выгружает их в /config/secrets.env
   # Прод-эволюция (вне MVP): вместо dev-root-token - AppRole или K8s-auth.
 
-# --- Ingress (catch-all; вход через kubectl port-forward svc/ingress-nginx-controller 8080:80) ---
+# --- Ingress ---
 ingress:
   enabled: true
+  hosts:
+    # false (дефолт): catch-all ingress, вход БЕЗ прав администратора -
+    #   kubectl port-forward svc/ingress-nginx-controller 8080:80 -> http://localhost:8080
+    # true (доменный режим, красивые URL):
+    #   1) helm upgrade с этим флагом
+    #   2) разовая запись в hosts (запуск от админа):
+    #      "<minikube ip> graphrag.local api.graphrag.local" >> C:\Windows\System32\drivers\etc\hosts
+    #      (ip: kubectl get nodes -o custom-columns=":.status.addresses[0].address")
+    #   3) minikube -p minikube tunnel  (держать запущенным; один раз спросит UAC)
+    #   -> http://graphrag.local / http://api.graphrag.local
+    enabled: false
+    web: graphrag.local
+    api: api.graphrag.local
 
 # --- Секреты ---
 # Заполняются файлом secrets.yaml (копия secrets.yaml.example):

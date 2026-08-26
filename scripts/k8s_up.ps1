@@ -46,6 +46,7 @@ if (-not $existing) {
 # 4) Итог
 & (Join-Path $PSScriptRoot "k8s_status.ps1")
 ""
-"UI:            http://localhost:8080/"
-"Swagger:       http://localhost:8080/docs"
+"UI:            http://localhost:8080/   (Swagger: /docs)"
+"Доменный режим: helm upgrade ... --set ingress.hosts.enabled=true + hosts + minikube tunnel"
+"                (см. docs/minikube-deployment.md, раздел 5.1)"
 "Newman gate:   powershell scripts/run_postman.ps1 -BaseUrl http://127.0.0.1:8080"
