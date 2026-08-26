@@ -389,6 +389,32 @@ components:
           - type: string
           - type: 'null'
           title: Error
+        stage:
+          anyOf:
+          - type: string
+            enum:
+            - parse
+            - model
+            - processing
+            - done
+            - error
+          - type: 'null'
+          title: Stage
+        files_done:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Files Done
+        files_total:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Files Total
+        chunks_done:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Chunks Done
       type: object
       required:
       - state

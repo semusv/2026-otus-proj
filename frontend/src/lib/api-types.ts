@@ -291,6 +291,14 @@ export interface components {
             } | null;
             /** Error */
             error?: string | null;
+            /** Stage */
+            stage?: ("parse" | "model" | "processing" | "done" | "error") | null;
+            /** Files Done */
+            files_done?: number | null;
+            /** Files Total */
+            files_total?: number | null;
+            /** Chunks Done */
+            chunks_done?: number | null;
         };
         /**
          * LoginRequest

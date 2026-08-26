@@ -12,7 +12,8 @@ namespace: graphrag
 
 # --- Образы (пины; backend/frontend собираются из этого репо и пушатся в Hub) ---
 image:
-  backend: vvsem/graphrag-backend:stage10
+  # .2 - сборка этапа 10 с прогресс-логированием ingestion (бэклог п.8)
+  backend: vvsem/graphrag-backend:stage10.2
   frontend: vvsem/graphrag-frontend:stage10
   corpusLoader: vvsem/graphrag-corpus:stage10   # alpine + корпус XML (3.2MB)
   postgres: postgres:16-alpine
@@ -25,7 +26,10 @@ imagePullPolicy: IfNotPresent
 resources:
   backend:
     requests: { memory: 2Gi, cpu: 500m }
-    limits: { memory: 4Gi, cpu: "4" }      # bge-m3 + reranker in-process ~4.5GB при прогреве
+    # CPU-лимит 10/16 ядер хоста (~60%), память 6Gi: ингестион - редкая тяжёлая
+    # операция (torch-эмбеддинги ~3.8GB RSS), ей можно отдавать много ресурсов;
+    # в покое бэкенд ест <0.1 ядра. Запросы остаются скромными.
+    limits: { memory: 6Gi, cpu: "10" }     # bge-m3 + reranker in-process
   postgres:
     requests: { memory: 256Mi, cpu: 100m }
     limits: { memory: 512Mi, cpu: "1" }
@@ -62,9 +66,11 @@ app:
   llmApiKey: lm-studio
   llmModel: qwen3.5-2b
   guardrailUseLlm: "true"
-  # Наблюдаемость: Jaeger/Prometheus остаются стеком compose (в кластер не дублируем);
-  # /metrics бэкенда работает всегда, трейсы выключены до включения коллектора
-  tracingEnabled: "false"
+  # Наблюдаемость живёт на хосте (отдельный проект graphrag-observability):
+  # кластер шлёт OTLP-трейсы в коллектор через host.minikube.internal,
+  # Prometheus скрейпит /metrics бэкенда через ingress port-forward
+  tracingEnabled: "true"
+  otelExporterEndpoint: http://host.minikube.internal:4318/v1/traces
   # Langfuse остаётся self-hosted стеком в Docker НА ХОСТЕ (порт 3300);
   # бэкенд отказоустойчив к его недоступности (таймауты + best-effort flush)
   langfuseEnabled: "true"

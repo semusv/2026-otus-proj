@@ -24,7 +24,7 @@ from app.core.security import resolve_clearances
 from app.db.base import get_session
 from app.db.models import AuditLog, ChatMessage, ChatSession, Role, RoleName, User
 from app.db.users import create_user
-from app.ingestion.pipeline import run_ingestion
+from app.ingestion.pipeline import IngestProgress, run_ingestion
 from app.schemas.admin import (
     IngestStartResponse,
     IngestStatusResponse,
@@ -71,6 +71,7 @@ async def start_ingest(
 
     settings: Settings = request.app.state.settings
     corpus_dir = Path(settings.ingest_corpus_dir)
+    progress = IngestProgress()
     state.update(
         {
             "state": "running",
@@ -78,17 +79,20 @@ async def start_ingest(
             "finished_at": None,
             "stats": None,
             "error": None,
+            # живой прогресс: объект читается в ingest_status (мутируется job'ом)
+            "_progress": progress,
         }
     )
 
     async def _job() -> None:
         try:
-            stats = await run_ingestion(settings, corpus_dir)
+            stats = await run_ingestion(settings, corpus_dir, progress=progress)
             state.update(
                 {"state": "done", "finished_at": datetime.now(UTC), "stats": asdict(stats)}
             )
         except Exception as exc:  # статус ошибки виден через /ingest/status
             logger.exception("Ingestion упал")
+            progress.stage = "error"
             state.update({"state": "error", "finished_at": datetime.now(UTC), "error": str(exc)})
 
     request.app.state.ingest_task = asyncio.create_task(_job())
@@ -105,7 +109,16 @@ async def ingest_status(
     request: Request, user: User = Depends(get_current_user)
 ) -> IngestStatusResponse:
     _require_admin(user)
-    return IngestStatusResponse.model_validate(_state(request.app.state))
+    state = dict(_state(request.app.state))
+    progress = state.pop("_progress", None)
+    if isinstance(progress, IngestProgress):
+        state.update(
+            stage=progress.stage,
+            files_done=progress.files_done,
+            files_total=progress.files_total,
+            chunks_done=progress.chunks_done,
+        )
+    return IngestStatusResponse.model_validate(state)
 
 
 @router.get(

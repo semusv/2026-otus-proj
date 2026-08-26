@@ -42,17 +42,32 @@ class IngestStats:
     concepts_extracted: int = 0
 
 
+@dataclass
+class IngestProgress:
+    """Живой прогресс прогона - читается /admin/ingest/status во время работы.
+
+    Крупные вехи (бэклог этапа 10): не мельчим - стадии и каждые ~10% файлов.
+    """
+
+    stage: str = "parse"  # parse -> model -> processing -> done/error
+    files_done: int = 0
+    files_total: int = 0
+    chunks_done: int = 0
+
+
 async def run_ingestion(
     settings: Settings,
     corpus_dir: Path,
     *,
     extract_concepts: bool | None = None,
     embedder: EmbeddingBackend | None = None,
+    progress: IngestProgress | None = None,
 ) -> IngestStats:
     """Полный прогон ingestion по каталогу XML-файлов.
 
     ``embedder`` - точка расширения для тестов (стаб с детерминированными
     векторами); по умолчанию создаётся реальный bge-m3 (ADR-009).
+    ``progress`` - необязательный объект живого прогресса для API-статуса.
     """
     stats = IngestStats()
     do_concepts = (
@@ -66,14 +81,31 @@ async def run_ingestion(
         logger.warning("В каталоге %s нет XML-файлов", corpus_dir)
         return stats
 
+    if progress is not None:
+        progress.stage, progress.files_done, progress.files_total = "parse", 0, len(xml_files)
+    logger.info(
+        "Ingestion запущен: файлов=%d, concepts=%s, корпус=%s",
+        len(xml_files),
+        do_concepts,
+        corpus_dir,
+    )
+
     acts: list[ParsedAct] = []
     for path in xml_files:
         try:
             acts.append(parse_act(path.read_bytes()))
         except Exception as exc:  # битые файлы не останавливают прогон
             stats.parse_errors.append(f"{path.name}: {exc}")
+            logger.warning("Файл не разобран: %s", exc)
     stats.acts_parsed = len(acts)
     corpus_ids = {act.id for act in acts}
+    if progress is not None:
+        progress.files_done = stats.acts_parsed + len(stats.parse_errors)
+    logger.info(
+        "Парсинг завершён: актов=%d, ошибок разбора=%d",
+        stats.acts_parsed,
+        len(stats.parse_errors),
+    )
 
     embedder = embedder or Embedder(
         settings.embedding_model,
@@ -91,7 +123,11 @@ async def run_ingestion(
     try:
         # первая загрузка модели (torch + веса с диска/HF) занимает десятки секунд -
         # только в потоке, иначе блокируем event loop и API перестаёт отвечать
+        if progress is not None:
+            progress.stage = "model"
+        logger.info("Загрузка модели эмбеддингов (%s)...", settings.embedding_model)
         dim = await asyncio.to_thread(lambda: embedder.dim)
+        logger.info("Модель готова (dim=%d), проверка коллекции/схемы", dim)
         await qdrant.ensure_collection(dim)
         await neo4j.ensure_schema()
 
@@ -101,7 +137,9 @@ async def run_ingestion(
         )
         semaphore = asyncio.Semaphore(_CONCURRENCY)
 
-        for act in acts:
+        total_acts = len(acts)
+        next_milestone = 1  # очередная граница ~10% для INFO-лога прогресса
+        for idx, act in enumerate(acts, start=1):
             clearance = resolve_clearance(
                 act.id,
                 internal_percent=settings.ingest_internal_percent,
@@ -151,17 +189,42 @@ async def run_ingestion(
                 ref_ids=list(filter_references(act, corpus_ids)),
                 concepts=concepts,
             )
-            logger.info(
-                "Акт %s: чанков=%d, clearance=%s, concepts=%d",
+            logger.debug(
+                "Акт %s (%d/%d): чанков=%d, clearance=%s, concepts=%d",
                 act.id,
+                idx,
+                total_acts,
                 len(chunks),
                 clearance,
                 len(concepts),
             )
+            if progress is not None:
+                progress.stage = "processing"
+                progress.files_done = idx
+                progress.chunks_done = stats.chunks_written
+            percent = idx * 100 // total_acts
+            if percent >= next_milestone * 10 or idx == total_acts:
+                logger.info(
+                    "Прогресс %d%%: актов %d/%d, чанков всего=%d",
+                    min(percent, 100),
+                    idx,
+                    total_acts,
+                    stats.chunks_written,
+                )
+                next_milestone += 1
     finally:
         await qdrant_client.close()
         await neo4j.close()
+        if progress is not None:
+            progress.stage = "done"
 
+    logger.info(
+        "Ingestion завершён: актов=%d, чанков=%d, concepts=%d, ошибок парсинга=%d",
+        stats.acts_parsed,
+        stats.chunks_written,
+        stats.concepts_extracted,
+        len(stats.parse_errors),
+    )
     return stats
 
 

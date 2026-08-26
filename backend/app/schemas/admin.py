@@ -17,6 +17,12 @@ class IngestStatusResponse(BaseModel):
     finished_at: datetime | None = None
     stats: dict[str, Any] | None = None
     error: str | None = None
+    # Живой прогресс прогона (бэклог этапа 10): стадия и счётчики.
+    # None вне прогона; files_total известен сразу после листинга корпуса.
+    stage: Literal["parse", "model", "processing", "done", "error"] | None = None
+    files_done: int | None = None
+    files_total: int | None = None
+    chunks_done: int | None = None
 
 
 class QdrantStats(BaseModel):
