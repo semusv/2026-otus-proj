@@ -30,33 +30,32 @@ kubectl get nodes --no-headers
 # Ждём готовности ingress-nginx (webhook нужен для helm upgrade)
 "==> ожидание ingress-nginx controller"
 kubectl -n ingress-nginx wait --for=condition=Available deploy/ingress-nginx-controller --timeout=120s 2>$null
-# Webhook endpoint может быть не готов сразу после Available - ждём явно
-$webhookReady = $false
-for ($i = 1; $i -le 12; $i++) {
-    try {
-        $ep = kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>$null
-    } catch { $ep = $null }
-    if ($ep) { $webhookReady = $true; break }
-    "webhook endpoint ещё не готов ($i/12), ждём 5с..."
-    Start-Sleep 5
-}
-if (-not $webhookReady) { Write-Host "WARN: webhook endpoint не найден, helm upgrade может упасть" -ForegroundColor Yellow }
+# Webhook endpoint не готов сразу после Available - ждём фиксированно 60с
+"==> ожидание webhook endpoint (60с)..."
+Start-Sleep 60
 
 # 2) Релиз
 if (-not $SkipInstall) {
+    # Масштабируем backend в 0, чтобы initContainer НЕ стартовал ДО записи секретов
+    "==> scale backend=0 (защита от vault_fetch до записи секретов)"
+    kubectl -n graphrag scale deploy/backend --replicas=0 2>$null
+
     "==> helm upgrade --install graphrag"
     $helmOk = $false
-    for ($attempt = 1; $attempt -le 5; $attempt++) {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
         helm upgrade graphrag $chart -n graphrag --create-namespace `
             -f (Join-Path $chart "values.yaml") -f $secretsPath 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { $helmOk = $true; break }
-        "helm upgrade попытка $attempt/5 не удалась (webhook ещё не готов?), ждём 15с..."
-        Start-Sleep 15
+        "helm upgrade попытка $attempt/10 не удалась (webhook ещё не готов?), ждём 30с..."
+        Start-Sleep 30
     }
-    if (-not $helmOk) { throw "helm upgrade failed после 5 попыток" }
+    if (-not $helmOk) { throw "helm upgrade failed после 10 попыток" }
 
-    "Ожидание деплоев (neo4j стартует до ~90с)..."
-    kubectl -n graphrag wait --for=condition=Available deploy --all --timeout=300s
+    # Ждём только deploys БЕЗ backend (он пока scaled=0)
+    "Ожидание deploys (vault, neo4j, postgres, qdrant, frontend)..."
+    foreach ($dep in @("vault","neo4j","postgres","qdrant","frontend")) {
+        kubectl -n graphrag wait --for=condition=Available deploy/$dep --timeout=300s 2>$null
+    }
 
     # Vault dev-mode хранит секреты в памяти - при рестарте ноды они теряются.
     # Читаем секреты из secrets.yaml и записываем в Vault напрямую через kubectl exec.
@@ -68,13 +67,14 @@ if (-not $SkipInstall) {
     $lfSecret    = if ($sec -match 'langfuseSecretKey:\s*(.+)') { $Matches[1].Trim() } else { "sk-lf-graphrag-dev-local" }
     $neo4jPass   = if ($sec -match 'neo4jPassword:\s*(.+)') { $Matches[1].Trim() } else { "dev_neo4j_password" }
     $pgPass      = if ($sec -match 'postgresPassword:\s*(.+)') { $Matches[1].Trim() } else { "dev_pg_password" }
-    $vaultToken  = if ($sec -match 'vaultRootToken:\s*(.+)') { $Matches[1].Trim() } else { "dev_root_token" }
 
     # Ждём пока Vault станет готов
     $vaultReady = $false
     for ($i = 1; $i -le 12; $i++) {
-        $code = kubectl -n graphrag exec deploy/vault -- sh -c "VAULT_ADDR=http://127.0.0.1:8200 vault status -format=json" 2>$null
-        if ($LASTEXITCODE -eq 0) { $vaultReady = $true; break }
+        try {
+            kubectl -n graphrag exec deploy/vault -- sh -c "VAULT_ADDR=http://127.0.0.1:8200 vault status -format=json" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { $vaultReady = $true; break }
+        } catch {}
         "Vault ещё не готов ($i/12), ждём 5с..."
         Start-Sleep 5
     }
@@ -102,11 +102,10 @@ vault kv put secret/graphrag/app \
 "@ 2>&1 | Out-Null
     "секреты записаны в Vault"
 
-    # Перезапускаем backend, чтобы initContainer подхватил свежие секреты
-    "==> rollout restart backend (свежие секреты из Vault)"
-    kubectl -n graphrag rollout restart deploy/backend
-    Start-Sleep 10
-    kubectl -n graphrag wait --for=condition=Available deploy/backend --timeout=120s
+    # Теперь поднимаем backend - initContainer найдёт секреты в Vault
+    "==> scale backend=1 (секреты в Vault готовы)"
+    kubectl -n graphrag scale deploy/backend --replicas=1
+    kubectl -n graphrag wait --for=condition=Available deploy/backend --timeout=300s
 }
 
 # 3) Port-forward ingress -> localhost:8080 (фоновый процесс)
