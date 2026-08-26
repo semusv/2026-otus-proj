@@ -65,8 +65,8 @@
 | frontend+vault | ~96Mi | ~192Mi |
 | Итого подов | | <= 8Gi из 12Gi VM |
 
-Кластер: существующий профиль minikube (docker driver), капы задаются при старте:
-`minikube -p minikube start --memory=12288 --cpus=6`.
+Кластер: профиль `graphrag` (docker driver), капы задаются при старте:
+`minikube -p graphrag start --memory=12288 --cpus=8`.
 Перед стартом core compose-стек останавливается; Langfuse остаётся в Docker.
 Контроль: `kubectl top nodes/pods` (metrics-server addon).
 
@@ -78,7 +78,7 @@
 
 ```powershell
 # 1) Кластер (если остановлен) - капы применятся при первом создании профиля
-minikube -p minikube start --driver=docker --memory=12288 --cpus=6 `
+minikube -p graphrag start --driver=docker --memory=12288 --cpus=8 `
          --addons=ingress --addons=metrics-server
 
 # 2) Сборка и публикация образов (из корня репо)
@@ -90,9 +90,9 @@ docker push vvsem/graphrag-frontend:stage10
 docker push vvsem/graphrag-corpus:stage10
 
 # 3) Прогрев ноды образами (kubelet скачал бы сам, но так быстрее/детерминированнее)
-minikube -p minikube ssh "sudo docker pull vvsem/graphrag-backend:stage10"
-minikube -p minikube ssh "sudo docker pull vvsem/graphrag-frontend:stage10"
-minikube -p minikube ssh "sudo docker pull vvsem/graphrag-corpus:stage10"
+minikube -p graphrag ssh "sudo docker pull vvsem/graphrag-backend:stage10"
+minikube -p graphrag ssh "sudo docker pull vvsem/graphrag-frontend:stage10"
+minikube -p graphrag ssh "sudo docker pull vvsem/graphrag-corpus:stage10"
 # БД/vault подтянутся kubelet'ом из Docker Hub при первом старте подов
 
 # 4) Секреты: один раз скопировать шаблон и заполнить
@@ -135,22 +135,33 @@ powershell scripts/run_postman.ps1 -BaseUrl http://127.0.0.1:8080
 | Скрипт | Что делает |
 |---|---|
 | `scripts/k8s_status.ps1` | поды/jobs, kubectl top, проверка `http://127.0.0.1:8080/health` |
-| `scripts/k8s_up.ps1` | стартует остановленный кластер, `helm upgrade --install`, поднимает port-forward, печатает статус |
-| `scripts/k8s_down.ps1` | глушит port-forward; `minikube stop` освобождает RAM (данные PVC сохраняются) |
+| `scripts/k8s_up.ps1` | стартует остановленный кластер, `helm upgrade --install`, записывает секреты в Vault, поднимает port-forward, печатает статус |
+| `scripts/k8s_down.ps1` | глушит port-forward/tunnel; `minikube stop` освобождает RAM (данные PVC сохраняются) |
+
+Все скрипты принимают `-Profile <name>` (по умолчанию `graphrag`).
+
+Makefile-цели:
+
+```bash
+make k8s-up              # полный запуск (профиль graphrag)
+make k8s-up PROFILE=xxx  # другой профиль
+make k8s-down            # остановить port-forward
+make k8s-down StopCluster=1  # + minikube stop
+make k8s-status          # статус подов
+```
 
 Ручной минимум:
 
 ```powershell
 # утром
-minikube -p minikube start                      # если stop был
-helm upgrade graphrag infra/helm/graphrag -n graphrag `
-     -f infra/helm/graphrag/values.yaml -f infra/helm/graphrag/secrets.yaml
+minikube -p graphrag start                   # если stop был
+# ... helm upgrade + vault seed (скрипт делает автоматически) ...
 Start-Process kubectl -ArgumentList '-n','ingress-nginx','port-forward',
      'svc/ingress-nginx-controller','8080:80' -WindowStyle Hidden
 
 # вечером
 Get-Process kubectl | Where-Object { $_.CommandLine -match 'port-forward' } | Stop-Process
-minikube -p minikube stop
+minikube -p graphrag stop
 ```
 
 UI для демо: `http://localhost:8080/` (SPA), Swagger: `http://localhost:8080/docs`.
@@ -187,7 +198,7 @@ Add-Content "$env:SystemRoot\System32\drivers\etc\hosts" "$ip graphrag.local api
 
 # 3) Туннель (держать запущенным; при старте один раз спросит UAC -
 #    добавляет маршрут Windows до сервисной сети кластера)
-minikube -p minikube tunnel
+minikube -p graphrag tunnel
 
 # 4) Браузер:
 #    http://graphrag.local      - SPA
@@ -208,7 +219,7 @@ minikube -p minikube tunnel
 ```powershell
 helm uninstall graphrag -n graphrag
 kubectl delete ns graphrag            # удалит и PVC (данные БД пропадут!)
-minikube -p minikube delete           # опционально: снести весь кластер
+minikube -p graphrag delete           # опционально: снести весь кластер
 ```
 
 Возврат к compose-стеку: `cd infra && docker compose up -d`

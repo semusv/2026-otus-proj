@@ -96,11 +96,13 @@ bench-llm:
 	cd $(BACKEND_DIR) && uv run python ../scripts/load_test/bench_llm.py
 
 # --- Этап 10: minikube ---
+PROFILE ?= graphrag
+
 k8s-up:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_up.ps1
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_up.ps1 -Profile $(PROFILE)
 
 k8s-down:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_down.ps1
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_down.ps1 -Profile $(PROFILE)
 
 k8s-status:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_status.ps1
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_status.ps1 -Profile $(PROFILE)

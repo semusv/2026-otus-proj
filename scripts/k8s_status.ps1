@@ -1,8 +1,14 @@
 # Статус GraphRAG-стека в minikube (этап 10).
-# Использование: powershell scripts/k8s_status.ps1
+# Использование:
+#   powershell scripts/k8s_status.ps1
+#   powershell scripts/k8s_status.ps1 -Profile myprofile
+param(
+    [string]$Profile = "graphrag"
+)
 $ErrorActionPreference = "Continue"
 
-"=== Кластер ==="
+"=== Кластер (профиль $Profile) ==="
+minikube -p $Profile status 2>$null | Select-String "host:|kubelet:|apiserver:" | ForEach-Object { $_.Line.Trim() }
 kubectl get nodes --no-headers
 
 "`n=== Поды/Jobs (namespace graphrag) ==="
