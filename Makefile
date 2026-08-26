@@ -5,7 +5,7 @@
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 
-.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install frontend-install frontend-lint frontend-test frontend-build openapi-types postman-run test-postman load-test bench-llm
+.PHONY: help lint fmt format check sync lock test-unit test-integration test-all test-judge seed-users openapi-export pre-commit-install frontend-install frontend-lint frontend-test frontend-build openapi-types postman-run test-postman load-test bench-llm k8s-up k8s-down k8s-status
 
 help:
 	@echo "lint              - ruff check + mypy (gate всех этапов)"
@@ -27,6 +27,8 @@ help:
 	@echo "postman-run       - алиас test-postman"
 	@echo "load-test         - locust-нагрузочный прогон (профили health|chat: LOAD_PROFILE=...)"
 	@echo "bench-llm         - micro-bench tokens/sec движка LLM (LM Studio/vLLM)"
+	@echo "k8s-up            - запуск стека в minikube: кластер + helm upgrade + port-forward"
+	@echo "k8s-down          - остановка port-forward (+ -StopCluster для minikube stop)"
 
 lint:
 	cd $(BACKEND_DIR) && uv run ruff check .
@@ -92,3 +94,13 @@ load-test:
 
 bench-llm:
 	cd $(BACKEND_DIR) && uv run python ../scripts/load_test/bench_llm.py
+
+# --- Этап 10: minikube ---
+k8s-up:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_up.ps1
+
+k8s-down:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_down.ps1
+
+k8s-status:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/k8s_status.ps1
