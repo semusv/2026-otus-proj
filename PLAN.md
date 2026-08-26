@@ -600,6 +600,15 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
    до тех пор разовая чистка — `scripts/cleanup_test_users.sql` (паттерны machine-generated
    имён, ручные аккаунты не затрагивает). Интеграционные тесты уже изолированы: свежие БД
    graphrag_itg_* на каждую сессию.
+8. **Понятный прогресс ingestion** (этап 10, запрос пользователя): сейчас во время прогона
+   «тишина» — в pipeline всего 2 лог-строки, а статус отдаёт только state. Сделать крупно,
+   не мельчить: INFO-строки на границах стадий (parse→chunk→embed→upsert→graph) и каждые
+   ~10% файлов («файл 30/100: акт ..., чанков 700»); в `GET /admin/ingest/status` добавить
+   поля stage/files_done/files_total/chunks_done (+ прогресс-бар в UI Admin); живые логи
+   смотреть `kubectl -n graphrag logs deploy/backend -f` (или docker logs в compose).
+9. **Grafana-дашборды для k8s**: сделан отдельный файл `graphrag-backend-k8s.json`
+   (job="backend-k8s", uid graphrag-backend-k8s) рядом с основным. Кандидат на рефакторинг:
+   один дашборд с переменной $job вместо двух копий (после стабилизации этапа 10).
 
 ### [x] Этап 9. E2E Postman + нагрузочный отчёт
 **Deliverables:** полная коллекция Postman (`tests/postman/`: env local, сценарии auth → ingest status → chat RBAC → health/metrics), прогон через Newman CLI `scripts/run_postman.(ps1|sh)`. Нагрузочный тест (locust или k6) на `/api/chat` (non-stream) и `/health` → `docs/load-report.md` (RPS, p50/p95, токены/сек на RTX 5070 Ti).
