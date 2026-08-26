@@ -586,15 +586,15 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
    через volumes, `docker cp`, запуск backend вне Docker (env указывает на любую локальную папку).
 3. **Загрузка документов через API/UI** (`POST /admin/documents`) — снимает зависимость от
    файловой системы контейнера вовсе; вместе с п.1 даёт «положил файл → нажал кнопку → добавилось».
-4. **Реальная гриф-разметка вместо демо-хэша**: метка из атрибута XML/фронта документа +
-   ручная перекатегоризация акта админом (`PATCH /admin/acts/{id}/clearance`).
-5. **Просмотр полного текста источника** по клику из цитаты (эндпоинт контента акта с ACL).
-6. **Удаление пользователя**: `DELETE /admin/users/{id}` (admin-only). Ограничения: нельзя
+4. ~~**Реальная гриф-разметка вместо демо-хэша**: метка из атрибута XML/фронта документа +
+   ручная перекатегоризация акта админом (`PATCH /admin/acts/{id}/clearance`).~~ — закрыто в stage 10.4 (Neo4j+Qdrant sync, Postman 25-acts).
+5. ~~**Просмотр полного текста источника** по клику из цитаты (эндпоинт контента акта с ACL).~~ — закрыто: фича C (Modal + `GET /api/acts/{act_id}/content`).
+6. ~~**Удаление пользователя**: `DELETE /admin/users/{id}` (admin-only). Ограничения: нельзя
    удалить самого себя и последнего активного админа. Порядок чистки FK (см.
    `scripts/cleanup_test_users.sql`): chat_messages → chat_sessions → sessions →
    audit_log отвязать (user_id=NULL, события сохраняются) → users; Qdrant/Neo4j не затрагиваются.
    UI: кнопка в строке «Пользователи» с confirm. Мягкий вариант по умолчанию — деактивация
-   (`is_active=false`, вход блокирован, история целая); hard delete — явным флагом.
+   (`is_active=false`, вход блокирован, история целая); hard delete — явным флагом.~~ — закрыто: фича C (AdminPage Delete button + Postman 20-users lifecycle).
 7. **Гигиена тестовых данных**: postman-коллекция при каждом прогоне создаёт qa_*/hacker_*
    пользователей в dev-БД. После п.6 добавить teardown-запросы удаления в конец коллекции;
    до тех пор разовая чистка — `scripts/cleanup_test_users.sql` (паттерны machine-generated
@@ -820,6 +820,13 @@ Vault-wired секреты, ingestion 2331 чанка, трейс чата 47 с
 (guardrail_in→planner→tools→fusion_rerank→generate→evaluate→guardrail_out + llm + SQL),
 Newman gate против кластера **36 запросов / 55 assertions / 0 fail**
 (`-BaseUrl http://127.0.0.1:8080`) ✓.
+
+**Фича C (фронтенд, backlog):** после stage 10 закрыты пункты бэклога 4/5/6:
+- Delete пользователя в AdminPage (soft/hard + confirm + inactive-стилизация)
+- Кликабельная цитата → Modal с метаданными акта + full_text (`GET /api/acts/{act_id}/content`)
+- Реэкспорт OpenAPI + регенерация api-types.ts
+- Postman: 25-acts (13 тестов clearance/content) + 20-users lifecycle (11 тестов)
+- Deployed: `vvsem/graphrag-frontend:stage10.1`, Newman 82 assertions / 0 fail
 
 Уроки этапа (учесть далее):
 - **Старый профиль minikube был ограничен 2 CPU на уровне docker-cgroup** (`cpu.max=200000/100000`

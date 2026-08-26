@@ -250,6 +250,139 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - admin
+      summary: Удалить учётную запись (по умолчанию мягко — деактивация; ?hard=true — физически)
+      description: 'hard=false (дефолт): деактивация — вход заблокирован, история/аудит целы.
+
+        hard=true: физическое удаление строки users c чисткой FK-зависимостей
+
+        (chat_messages → chat_sessions → sessions) и обезличиванием audit_log
+
+        (user_id=NULL, события сохраняются). Qdrant/Neo4j не затрагиваются.
+
+        Защиты: нельзя удалить себя; нельзя удалить последнего активного админа.
+
+        Имя освобождается только при hard=true (при soft имя остаётся занятым).'
+      operationId: delete_user_admin_users__user_id__delete
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      - name: hard
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Hard
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteUserResponse'
+        '403':
+          description: Не admin или попытка удалить себя
+        '404':
+          description: Пользователь не найден
+        '409':
+          description: Последний активный админ
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/users/{user_id}/status:
+    patch:
+      tags:
+      - admin
+      summary: Деактивировать/реактивировать учётную запись (мягкое отключение)
+      description: 'Мягкое отключение: is_active=false блокирует вход (login → 401) и
+
+        инвалидирует существующие JWT (любой запрос → 401), история и аудит целы.
+
+        Реактивация возвращает доступ без создания новых сущностей.'
+      operationId: set_user_status_admin_users__user_id__status_patch
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserStatusUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOut'
+        '403':
+          description: Не admin или попытка изменить себя
+        '404':
+          description: Пользователь не найден
+        '409':
+          description: Последний активный админ
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/acts/{act_id}/clearance:
+    patch:
+      tags:
+      - admin
+      summary: 'Перекатегоризация акта: сменить гриф (Neo4j + payload чанков Qdrant)'
+      description: 'Ручная перекатегоризация (бэклог п.4). Метка меняется синхронно в двух
+
+        хранилищах: Neo4j Act.clearance (метаданные) и payload всех Qdrant-точек
+
+        акта - pre-fetch ACL ретриверов читает метку именно из payload. Доступ
+
+        пересчитывается мгновенно, перезапуск/переиндексация не нужны.'
+      operationId: change_act_clearance_admin_acts__act_id__clearance_patch
+      parameters:
+      - name: act_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Act Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActClearanceUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActOut'
+        '403':
+          description: Не admin
+        '404':
+          description: Акт не найден
+        '422':
+          description: Неизвестная метка доступа
   /api/chat:
     post:
       tags:
@@ -283,8 +416,126 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/acts/{act_id}/content:
+    get:
+      tags:
+      - acts
+      summary: Полный текст акта с метаданными (доступ по метке грифа)
+      operationId: act_content_api_acts__act_id__content_get
+      parameters:
+      - name: act_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Act Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActContentResponse'
+        '403':
+          description: Метка акта выше уровня доступа роли
+        '404':
+          description: Акт не найден
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    ActClearanceUpdate:
+      properties:
+        clearance:
+          type: string
+          enum:
+          - PUBLIC
+          - INTERNAL
+          - SECRET
+          title: Clearance
+      type: object
+      required:
+      - clearance
+      title: ActClearanceUpdate
+      description: 'Ручная перекатегоризация акта админом (бэклог п.4).
+
+
+        Обновляет метку синхронно в обоих хранилищах: Neo4j (метаданные) и Qdrant
+
+        (payload всех чанков - фильтр pre-fetch ACL читает метку именно оттуда).'
+      examples:
+      - clearance: SECRET
+    ActContentResponse:
+      properties:
+        act:
+          $ref: '#/components/schemas/ActOut'
+        chunk_count:
+          type: integer
+          title: Chunk Count
+        full_text:
+          type: string
+          title: Full Text
+      type: object
+      required:
+      - act
+      - chunk_count
+      - full_text
+      title: ActContentResponse
+      description: 'Полный текст акта, собранный из чанков векторного хранилища.
+
+
+        Выдаётся только если метка акта входит в ACL пользователя (бэклог п.5).'
+      examples:
+      - act:
+          act_id: '920000001'
+          clearance: PUBLIC
+          date: 15.03.2001
+          doc_number: 920000001-ФЗ
+          status: Действует без изменений
+          title: Об акционерных обществах
+        chunk_count: 1
+        full_text: Статья 1. ...
+    ActOut:
+      properties:
+        act_id:
+          type: string
+          title: Act Id
+        title:
+          type: string
+          title: Title
+        doc_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Doc Number
+        date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        clearance:
+          type: string
+          enum:
+          - PUBLIC
+          - INTERNAL
+          - SECRET
+          title: Clearance
+      type: object
+      required:
+      - act_id
+      - title
+      - clearance
+      title: ActOut
+      description: Метаданные акта из графа знаний.
     ChatRequest:
       properties:
         message:
@@ -312,6 +563,34 @@ components:
       - message
       title: ChatRequest
       description: Запрос к агенту; ``stream=False`` возвращает обычный JSON (Postman/нагрузка).
+    DeleteUserResponse:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        username:
+          type: string
+          title: Username
+        mode:
+          type: string
+          enum:
+          - deactivated
+          - deleted
+          title: Mode
+      type: object
+      required:
+      - user_id
+      - username
+      - mode
+      title: DeleteUserResponse
+      description: Итог удаления учётной записи (DELETE /admin/users/{id}?hard=true|false).
+      examples:
+      - mode: deleted
+        user_id: '...'
+        username: qa_x
+      - mode: deactivated
+        user_id: '...'
+        username: qa_x
     ErrorResponse:
       properties:
         code:
@@ -663,6 +942,18 @@ components:
       description: Смена роли пользователя админом; метки доступа пересчитаются из роли.
       examples:
       - role: analyst
+    UserStatusUpdate:
+      properties:
+        is_active:
+          type: boolean
+          title: Is Active
+      type: object
+      required:
+      - is_active
+      title: UserStatusUpdate
+      description: Неактивный пользователь не может войти; существующие JWT отклоняются
+      examples:
+      - is_active: false
     UsersListResponse:
       properties:
         users:

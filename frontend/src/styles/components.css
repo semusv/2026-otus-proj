@@ -918,3 +918,149 @@ textarea:focus {
 .role-select:hover {
   border-color: var(--accent);
 }
+
+/* ---------- модалка ---------- */
+.modal {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+  max-width: 720px;
+  width: 90vw;
+  max-height: 80vh;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ---------- act content modal ---------- */
+.act-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.act-meta dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.act-meta dd {
+  margin: 0;
+}
+
+.act-text {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+/* ---------- inactive user row ---------- */
+.user-row-inactive {
+  opacity: 0.5;
+}
+
+.user-row-inactive .user-name {
+  text-decoration: line-through;
+}
+
+/* ---------- кнопка удаления ---------- */
+.btn-danger-small {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--err);
+  color: #fff;
+  border: 1px solid var(--err);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all var(--transition);
+}
+
+.btn-danger-small:hover {
+  background: #c0392b;
+  border-color: #c0392b;
+}
+
+/* ---------- грифы актов ---------- */
+.act-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.act-search input {
+  flex: 1;
+  max-width: 300px;
+}
+
+.act-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.act-meta-inline {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.act-meta-inline dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.act-meta-inline dd {
+  margin: 0;
+}
+
+.act-clearance-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

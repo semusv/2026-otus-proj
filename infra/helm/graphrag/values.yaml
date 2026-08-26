@@ -13,8 +13,8 @@ namespace: graphrag
 # --- Образы (пины; backend/frontend собираются из этого репо и пушатся в Hub) ---
 image:
   # .2 - сборка этапа 10 с прогресс-логированием ingestion (бэклог п.8)
-  backend: vvsem/graphrag-backend:stage10.3
-  frontend: vvsem/graphrag-frontend:stage10
+  backend: vvsem/graphrag-backend:stage10.4
+  frontend: vvsem/graphrag-frontend:stage10.3
   corpusLoader: vvsem/graphrag-corpus:stage10   # alpine + корпус XML (3.2MB)
   postgres: postgres:16-alpine
   qdrant: qdrant/qdrant:v1.19.0

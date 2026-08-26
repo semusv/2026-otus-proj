@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   ApiError,
   adminCreateUser,
+  adminDeleteUser,
   adminListUsers,
+  adminUpdateActClearance,
   adminUpdateUserRole,
+  getActContent,
   ingestStatus,
   startIngest,
   storageStats,
@@ -14,6 +17,7 @@ type IngestStatusResponse = components['schemas']['IngestStatusResponse']
 type StorageStats = components['schemas']['StorageStatsResponse']
 type UserOut = components['schemas']['UserOut']
 type UserCreate = components['schemas']['UserCreate']
+type ActContentResponse = components['schemas']['ActContentResponse']
 
 interface AdminPageProps {
   onUnauthorized: () => void
@@ -40,6 +44,11 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [nowTick, setNowTick] = useState(() => Date.now())
+  const [actId, setActId] = useState('')
+  const [actData, setActData] = useState<ActContentResponse | null>(null)
+  const [actError, setActError] = useState<string | null>(null)
+  const [actNotice, setActNotice] = useState<string | null>(null)
+  const [actBusy, setActBusy] = useState(false)
 
   const refreshStatus = useCallback(async (): Promise<IngestStatusResponse> => {
     const current = await ingestStatus()
@@ -111,6 +120,81 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       else if (err instanceof ApiError && err.status === 401) onUnauthorized()
       else setUsersError(err instanceof ApiError ? err.message : 'Не удалось сменить роль')
       await refreshUsers()
+    }
+  }
+
+  const deleteUser = async (target: UserOut) => {
+    const hard = window.confirm(
+      `Удалить ${target.username}?\n\n` +
+        'ОК — мягкое удаление (деактивация, можно восстановить).\n' +
+        'Отмена — физическое удаление (необратимо).',
+    )
+    if (!hard) {
+      const reallyHard = window.confirm(
+        `Физически удалить ${target.username}?\n\nЭто необратимо: данные будут удалены.`,
+      )
+      if (!reallyHard) return
+    }
+    setUsersError(null)
+    setUserNotice(null)
+    try {
+      const result = await adminDeleteUser(target.user_id, !hard)
+      setUserNotice(
+        result.mode === 'deleted'
+          ? `Пользователь ${result.username} физически удалён`
+          : `Пользователь ${result.username} деактивирован`,
+      )
+      await refreshUsers()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403)
+        setUsersError('Нельзя удалить себя')
+      else if (err instanceof ApiError && err.status === 409)
+        setUsersError('Нельзя удалить последнего активного админа')
+      else if (err instanceof ApiError && err.status === 401) onUnauthorized()
+      else setUsersError(err instanceof ApiError ? err.message : 'Не удалось удалить пользователя')
+    }
+  }
+
+  const findAct = async () => {
+    if (actId.trim().length === 0) return
+    setActError(null)
+    setActNotice(null)
+    setActData(null)
+    setActBusy(true)
+    try {
+      const data = await getActContent(actId.trim())
+      setActData(data)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setActError('Акт не найден')
+      else if (err instanceof ApiError && err.status === 403) setActError('Недостаточно прав для просмотра этого акта')
+      else if (err instanceof ApiError && err.status === 401) onUnauthorized()
+      else setActError(err instanceof ApiError ? err.message : 'Не удалось загрузить акт')
+    } finally {
+      setActBusy(false)
+    }
+  }
+
+  const changeClearance = async (clearance: 'PUBLIC' | 'INTERNAL' | 'SECRET') => {
+    if (actData === null) return
+    const confirmed = window.confirm(
+      `Сменить гриф акта ${actData.act.act_id}: ${actData.act.clearance} → ${clearance}?\n\n` +
+        'Обновится в Neo4j и Qdrant синхронно.',
+    )
+    if (!confirmed) return
+    setActError(null)
+    setActNotice(null)
+    setActBusy(true)
+    try {
+      const updated = await adminUpdateActClearance(actData.act.act_id, clearance)
+      setActNotice(`Гриф акта ${updated.act_id} изменён на ${updated.clearance}`)
+      setActData((prev) => (prev !== null ? { ...prev, act: updated } : null))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setActError('Акт не найден')
+      else if (err instanceof ApiError && err.status === 422) setActError('Недопустимая метка грифа')
+      else if (err instanceof ApiError && err.status === 401) onUnauthorized()
+      else setActError(err instanceof ApiError ? err.message : 'Не удалось сменить гриф')
+    } finally {
+      setActBusy(false)
     }
   }
 
@@ -301,7 +385,7 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
         ) : (
           <div className="user-list">
             {users.map((u) => (
-              <div key={u.user_id} className="user-row" title={u.created_at}>
+              <div key={u.user_id} className={`user-row${u.is_active ? '' : ' user-row-inactive'}`} title={u.created_at}>
                 <span className="mono user-name">{u.username}</span>
                 <span className={`badge ${u.role === 'admin' ? 'badge-err' : u.role === 'analyst' ? 'badge-info' : 'badge-neutral'}`}>
                   {u.role}
@@ -322,6 +406,14 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
                   <option value="analyst">analyst</option>
                   <option value="admin">admin</option>
                 </select>
+                <button
+                  type="button"
+                  className="btn-danger-small"
+                  onClick={() => void deleteUser(u)}
+                  title="Удалить пользователя"
+                >
+                  Удалить
+                </button>
               </div>
             ))}
           </div>
@@ -359,6 +451,70 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
         </form>
 
         <p className="hint muted">Статус обновляется автоматически каждые {POLL_INTERVAL_MS / 1000} с во время прогона</p>
+
+        <h3 className="stats-title">Грифы актов</h3>
+        <p className="muted stats-subtitle">
+          Ручная перекатегоризация: смена грифа clearance обновляет метку в Neo4j и payload всех чанков в Qdrant.
+        </p>
+
+        {actError !== null && <div className="error-box">{actError}</div>}
+        {actNotice !== null && <div className="info-box">{actNotice}</div>}
+
+        <form className="act-search" onSubmit={(e) => { e.preventDefault(); void findAct() }}>
+          <input
+            className="mono"
+            value={actId}
+            onChange={(e) => setActId(e.target.value)}
+            placeholder="ID акта (напр. 102010098)"
+            required
+          />
+          <button className="btn btn-primary btn-small" type="submit" disabled={actBusy}>
+            {actBusy ? 'Поиск…' : 'Найти'}
+          </button>
+        </form>
+
+        {actData !== null && (
+          <div className="act-card">
+            <dl className="act-meta-inline">
+              <dt>Название</dt>
+              <dd>{actData.act.title}</dd>
+              {actData.act.doc_number != null && (
+                <>
+                  <dt>Номер</dt>
+                  <dd className="mono">{actData.act.doc_number}</dd>
+                </>
+              )}
+              {actData.act.date != null && (
+                <>
+                  <dt>Дата</dt>
+                  <dd>{actData.act.date}</dd>
+                </>
+              )}
+              <dt>Гриф</dt>
+              <dd>
+                <span className={`clearance-chip clearance-${actData.act.clearance.toLowerCase()}`}>
+                  {actData.act.clearance}
+                </span>
+              </dd>
+              <dt>Чанков</dt>
+              <dd>{actData.chunk_count}</dd>
+            </dl>
+            <div className="act-clearance-controls">
+              <span className="muted">Сменить гриф:</span>
+              {(['PUBLIC', 'INTERNAL', 'SECRET'] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`btn btn-small ${actData.act.clearance === c ? 'btn-primary' : 'btn-ghost'}`}
+                  disabled={actData.act.clearance === c || actBusy}
+                  onClick={() => void changeClearance(c)}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   )

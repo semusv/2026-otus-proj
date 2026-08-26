@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { ApiError, chatStream } from '../lib/api'
+import { ApiError, chatStream, getActContent, adminUpdateActClearance, type ActContentResponse } from '../lib/api'
+import { getAuth } from '../lib/auth'
 import type { ChatStatus, Citation, RelatedAct, StatusEvent } from '../lib/sse'
 import PipelineChips from '../components/PipelineChips'
 import ClearanceBadge, { StatusBadge } from '../components/Badges'
+import Modal from '../components/Modal'
 
 interface ChatPageProps {
   onUnauthorized: () => void
@@ -207,8 +209,44 @@ function AssistantMessage({ msg }: { msg: UiMessage }) {
   const [hlSource, setHlSource] = useState<string | null>(null)
   const flashTimer = useRef<number | undefined>(undefined)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const [actModal, setActModal] = useState<{ open: boolean; loading: boolean; data: ActContentResponse | null; error: string | null }>({
+    open: false,
+    loading: false,
+    data: null,
+    error: null,
+  })
 
   useEffect(() => () => window.clearTimeout(flashTimer.current), [])
+
+  const openActModal = async (actId: string) => {
+    setActModal({ open: true, loading: true, data: null, error: null })
+    try {
+      const data = await getActContent(actId)
+      setActModal({ open: true, loading: false, data, error: null })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Не удалось загрузить акт'
+      setActModal({ open: true, loading: false, data: null, error: message })
+    }
+  }
+
+  const closeActModal = () => setActModal((prev) => ({ ...prev, open: false }))
+
+  const changeActClearance = async (clearance: 'PUBLIC' | 'INTERNAL' | 'SECRET') => {
+    if (actModal.data === null) return
+    const confirmed = window.confirm(
+      `Сменить гриф акта ${actModal.data.act.act_id}: ${actModal.data.act.clearance} → ${clearance}?`,
+    )
+    if (!confirmed) return
+    try {
+      const updated = await adminUpdateActClearance(actModal.data.act.act_id, clearance)
+      setActModal((prev) => (prev.data !== null ? { ...prev, data: { ...prev.data, act: updated } } : prev))
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Не удалось сменить гриф'
+      setActModal((prev) => ({ ...prev, error: message }))
+    }
+  }
+
+  const isAdmin = getAuth()?.role === 'admin'
 
   /** Подсветить источник и подскроллить к нему (маркер ↔ карточка цитаты). */
   const focusSource = (sourceId: string, scrollTarget: 'card' | 'mark') => {
@@ -252,7 +290,10 @@ function AssistantMessage({ msg }: { msg: UiMessage }) {
                 className={`citation-card${hlSource === c.source_id ? ' citation-card-active' : ''}`}
                 onMouseEnter={() => setHlSource(c.source_id)}
                 onMouseLeave={() => setHlSource(null)}
-                onClick={() => focusSource(c.source_id, 'mark')}
+                onClick={() => {
+                  focusSource(c.source_id, 'mark')
+                  void openActModal(c.act_id)
+                }}
                 title={`Показать ${c.source_id} в тексте ответа`}
               >
                 <span className="mono cite-mark">[{c.source_id}]</span>
@@ -305,6 +346,60 @@ function AssistantMessage({ msg }: { msg: UiMessage }) {
           )}
         </div>
       )}
+
+      <Modal open={actModal.open} onClose={closeActModal} title="Текст акта">
+        {actModal.loading && <p className="muted">Загрузка…</p>}
+        {actModal.error !== null && <div className="error-box">{actModal.error}</div>}
+        {actModal.data !== null && (
+          <>
+            <dl className="act-meta">
+              <dt>ID</dt>
+              <dd className="mono">{actModal.data.act.act_id}</dd>
+              <dt>Название</dt>
+              <dd>{actModal.data.act.title}</dd>
+              {actModal.data.act.doc_number != null && (
+                <>
+                  <dt>Номер</dt>
+                  <dd className="mono">{actModal.data.act.doc_number}</dd>
+                </>
+              )}
+              {actModal.data.act.date != null && (
+                <>
+                  <dt>Дата</dt>
+                  <dd>{actModal.data.act.date}</dd>
+                </>
+              )}
+              {actModal.data.act.status != null && (
+                <>
+                  <dt>Статус</dt>
+                  <dd>{actModal.data.act.status}</dd>
+                </>
+              )}
+              <dt>Гриф</dt>
+              <dd><ClearanceBadge clearance={actModal.data.act.clearance} /></dd>
+              <dt>Чанков</dt>
+              <dd>{actModal.data.chunk_count}</dd>
+            </dl>
+            {isAdmin && (
+              <div className="act-clearance-controls">
+                <span className="muted">Сменить гриф:</span>
+                {(['PUBLIC', 'INTERNAL', 'SECRET'] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`btn btn-small ${actModal.data!.act.clearance === c ? 'btn-primary' : 'btn-ghost'}`}
+                    disabled={actModal.data!.act.clearance === c}
+                    onClick={() => void changeActClearance(c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+            <pre className="act-text">{actModal.data.full_text}</pre>
+          </>
+        )}
+      </Modal>
     </div>
   )
 }

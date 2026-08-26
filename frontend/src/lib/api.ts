@@ -21,6 +21,9 @@ export type StorageStats = components['schemas']['StorageStatsResponse']
 export type UserCreate = components['schemas']['UserCreate']
 export type UserOut = components['schemas']['UserOut']
 export type UsersListResponse = components['schemas']['UsersListResponse']
+export type DeleteUserResponse = components['schemas']['DeleteUserResponse']
+export type ActContentResponse = components['schemas']['ActContentResponse']
+export type ActOut = components['schemas']['ActOut']
 
 export class ApiError extends Error {
   readonly status: number
@@ -167,6 +170,39 @@ export function adminUpdateUserRole(userId: string, role: UserCreate['role']): P
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
+  })
+}
+
+/** Удалить пользователя — admin-only. hard=false → деактивация, hard=true → физическое удаление. */
+export function adminDeleteUser(userId: string, hard: boolean): Promise<DeleteUserResponse> {
+  return request<DeleteUserResponse>(`/admin/users/${userId}?hard=${hard}`, {
+    method: 'DELETE',
+  })
+}
+
+/** Деактивировать/реактивировать пользователя — admin-only. */
+export function adminSetUserStatus(userId: string, isActive: boolean): Promise<UserOut> {
+  return request<UserOut>(`/admin/users/${userId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_active: isActive }),
+  })
+}
+
+/** Полный текст акта с метаданными — авторизованный пользователь (ACL по clearance). */
+export function getActContent(actId: string): Promise<ActContentResponse> {
+  return request<ActContentResponse>(`/api/acts/${actId}/content`)
+}
+
+/** Сменить гриф акта — admin-only; обновляет Neo4j + Qdrant синхронно. */
+export function adminUpdateActClearance(
+  actId: string,
+  clearance: 'PUBLIC' | 'INTERNAL' | 'SECRET',
+): Promise<ActOut> {
+  return request<ActOut>(`/admin/acts/${actId}/clearance`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clearance }),
   })
 }
 

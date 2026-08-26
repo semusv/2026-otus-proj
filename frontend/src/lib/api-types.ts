@@ -180,7 +180,16 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Удалить учётную запись (по умолчанию мягко — деактивация; ?hard=true — физически)
+         * @description hard=false (дефолт): деактивация — вход заблокирован, история/аудит целы.
+         *     hard=true: физическое удаление строки users c чисткой FK-зависимостей
+         *     (chat_messages → chat_sessions → sessions) и обезличиванием audit_log
+         *     (user_id=NULL, события сохраняются). Qdrant/Neo4j не затрагиваются.
+         *     Защиты: нельзя удалить себя; нельзя удалить последнего активного админа.
+         *     Имя освобождается только при hard=true (при soft имя остаётся занятым).
+         */
+        delete: operations["delete_user_admin_users__user_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -190,6 +199,51 @@ export interface paths {
          *     случайной потери последнего админа).
          */
         patch: operations["change_user_role_admin_users__user_id__patch"];
+        trace?: never;
+    };
+    "/admin/users/{user_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Деактивировать/реактивировать учётную запись (мягкое отключение)
+         * @description Мягкое отключение: is_active=false блокирует вход (login → 401) и
+         *     инвалидирует существующие JWT (любой запрос → 401), история и аудит целы.
+         *     Реактивация возвращает доступ без создания новых сущностей.
+         */
+        patch: operations["set_user_status_admin_users__user_id__status_patch"];
+        trace?: never;
+    };
+    "/admin/acts/{act_id}/clearance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Перекатегоризация акта: сменить гриф (Neo4j + payload чанков Qdrant)
+         * @description Ручная перекатегоризация (бэклог п.4). Метка меняется синхронно в двух
+         *     хранилищах: Neo4j Act.clearance (метаданные) и payload всех Qdrant-точек
+         *     акта - pre-fetch ACL ретриверов читает метку именно из payload. Доступ
+         *     пересчитывается мгновенно, перезапуск/переиндексация не нужны.
+         */
+        patch: operations["change_act_clearance_admin_acts__act_id__clearance_patch"];
         trace?: never;
     };
     "/api/chat": {
@@ -214,10 +268,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/acts/{act_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Полный текст акта с метаданными (доступ по метке грифа) */
+        get: operations["act_content_api_acts__act_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActClearanceUpdate
+         * @description Ручная перекатегоризация акта админом (бэклог п.4).
+         *
+         *     Обновляет метку синхронно в обоих хранилищах: Neo4j (метаданные) и Qdrant
+         *     (payload всех чанков - фильтр pre-fetch ACL читает метку именно оттуда).
+         * @example {
+         *       "clearance": "SECRET"
+         *     }
+         */
+        ActClearanceUpdate: {
+            /**
+             * Clearance
+             * @enum {string}
+             */
+            clearance: "PUBLIC" | "INTERNAL" | "SECRET";
+        };
+        /**
+         * ActContentResponse
+         * @description Полный текст акта, собранный из чанков векторного хранилища.
+         *
+         *     Выдаётся только если метка акта входит в ACL пользователя (бэклог п.5).
+         * @example {
+         *       "act": {
+         *         "act_id": "920000001",
+         *         "clearance": "PUBLIC",
+         *         "date": "15.03.2001",
+         *         "doc_number": "920000001-ФЗ",
+         *         "status": "Действует без изменений",
+         *         "title": "Об акционерных обществах"
+         *       },
+         *       "chunk_count": 1,
+         *       "full_text": "Статья 1. ..."
+         *     }
+         */
+        ActContentResponse: {
+            act: components["schemas"]["ActOut"];
+            /** Chunk Count */
+            chunk_count: number;
+            /** Full Text */
+            full_text: string;
+        };
+        /**
+         * ActOut
+         * @description Метаданные акта из графа знаний.
+         */
+        ActOut: {
+            /** Act Id */
+            act_id: string;
+            /** Title */
+            title: string;
+            /** Doc Number */
+            doc_number?: string | null;
+            /** Date */
+            date?: string | null;
+            /** Status */
+            status?: string | null;
+            /**
+             * Clearance
+             * @enum {string}
+             */
+            clearance: "PUBLIC" | "INTERNAL" | "SECRET";
+        };
         /**
          * ChatRequest
          * @description Запрос к агенту; ``stream=False`` возвращает обычный JSON (Postman/нагрузка).
@@ -240,6 +374,31 @@ export interface components {
              * @default true
              */
             stream: boolean;
+        };
+        /**
+         * DeleteUserResponse
+         * @description Итог удаления учётной записи (DELETE /admin/users/{id}?hard=true|false).
+         * @example {
+         *       "mode": "deleted",
+         *       "user_id": "...",
+         *       "username": "qa_x"
+         *     }
+         * @example {
+         *       "mode": "deactivated",
+         *       "user_id": "...",
+         *       "username": "qa_x"
+         *     }
+         */
+        DeleteUserResponse: {
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "deactivated" | "deleted";
         };
         /**
          * ErrorResponse
@@ -482,6 +641,17 @@ export interface components {
              * @enum {string}
              */
             role: "viewer" | "analyst" | "admin";
+        };
+        /**
+         * UserStatusUpdate
+         * @description Неактивный пользователь не может войти; существующие JWT отклоняются
+         * @example {
+         *       "is_active": false
+         *     }
+         */
+        UserStatusUpdate: {
+            /** Is Active */
+            is_active: boolean;
         };
         /** UsersListResponse */
         UsersListResponse: {
@@ -825,6 +995,60 @@ export interface operations {
             };
         };
     };
+    delete_user_admin_users__user_id__delete: {
+        parameters: {
+            query?: {
+                hard?: boolean;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteUserResponse"];
+                };
+            };
+            /** @description Не admin или попытка удалить себя */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Пользователь не найден */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Последний активный админ */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     change_user_role_admin_users__user_id__patch: {
         parameters: {
             query?: never;
@@ -874,6 +1098,109 @@ export interface operations {
             };
         };
     };
+    set_user_status_admin_users__user_id__status_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserStatusUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Не admin или попытка изменить себя */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Пользователь не найден */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Последний активный админ */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_act_clearance_admin_acts__act_id__clearance_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                act_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActClearanceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActOut"];
+                };
+            };
+            /** @description Не admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Акт не найден */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Неизвестная метка доступа */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     chat_api_chat_post: {
         parameters: {
             query?: never;
@@ -898,6 +1225,51 @@ export interface operations {
             };
             /** @description Нет/невалидный JWT */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    act_content_api_acts__act_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                act_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActContentResponse"];
+                };
+            };
+            /** @description Метка акта выше уровня доступа роли */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Акт не найден */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "b7e2c1a0-0000-4a1a-9f00-graphrag00009",
-    "name": "GraphRAG Platform — E2E (этапы 3–9)",
-    "description": "Полный сквозной сценарий (gate этапа 9):\n00-system: health/metrics/trace-echo\n10-auth: логин, ошибки аутентификации\n20-users: управление учётками и RBAC-инварианты ролей (этап 8)\n30-ingest: статус ingestion (read-only), 401/403\n40-chat-rbac: чат non-stream/SSE, память диалога, ACL на цитатах, injection, чужая сессия\ningest-run: ОПЦИОНАЛЬНЫЙ запуск ingestion (в gate не входит: полный прогон жжёт CPU 10–30 мин)\n\nЗапуск: make test-postman (scripts/run_postman.ps1|.sh, newman).\nБазовый URL по умолчанию — Traefik http://api.localhost.",
+    "name": "GraphRAG Platform — E2E (этапы 3–10)",
+    "description": "Полный сквозной сценарий (gate этапа 10):\n00-system: health/metrics/trace-echo\n10-auth: логин, ошибки аутентификации\n20-users: управление учётками, RBAC-инварианты ролей, жизненный цикл (deactivate/reactivate/delete)\n25-acts: контент актов ACL, управление грифом (clearance) в Neo4j+Qdrant\n30-ingest: статус ingestion (read-only), 401/403\n40-chat-rbac: чат non-stream/SSE, память диалога, ACL на цитатах, injection, чужая сессия\ningest-run: ОПЦИОНАЛЬНЫЙ запуск ingestion (в gate не входит: полный прогон жжёт CPU 10–30 мин)\n\nЗапуск: make test-postman (scripts/run_postman.ps1|.sh, newman).\nБазовый URL по умолчанию — Traefik http://api.localhost.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -36,6 +36,7 @@
     { "key": "tokenViewer", "value": "" },
     { "key": "tokenAnalyst", "value": "" },
     { "key": "userAId", "value": "" },
+    { "key": "userBId", "value": "" },
     { "key": "sessionId", "value": "" },
     { "key": "traceE2E", "value": "" }
   ],
@@ -290,7 +291,8 @@
                   "  const body = pm.response.json();",
                   "  pm.expect(body.role).to.eql(\"analyst\");",
                   "  pm.expect(body.clearances).to.eql([\"INTERNAL\", \"PUBLIC\"]);",
-                  "});"
+                  "});",
+                  "pm.collectionVariables.set(\"userBId\", pm.response.json().user_id);"
                 ]
               }
             }
@@ -605,6 +607,594 @@
               "script": {
                 "type": "text/javascript",
                 "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin деактивирует user A (is_active=false)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/users/{{userAId}}/status",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"is_active\":false}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, is_active=false\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().is_active).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Деактивированный A не может войти -> 401",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseURL}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"username\":\"qa_view_{{runId}}\",\"password\":\"qaview123\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"код invalid_credentials\", () => pm.expect(pm.response.json().code).to.eql(\"invalid_credentials\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Деактивированный A: старый JWT -> 401",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenA}}" }],
+            "url": "{{baseURL}}/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin реактивирует user A (is_active=true)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/users/{{userAId}}/status",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"is_active\":true}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, is_active=true\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().is_active).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Реактивированный A может войти",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseURL}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"username\":\"qa_view_{{runId}}\",\"password\":\"qaview123\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, роль analyst (была сменена ранее)\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().role).to.eql(\"analyst\");",
+                  "});",
+                  "pm.collectionVariables.set(\"tokenA\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin soft-deletes user B",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseURL}}/admin/users/{{userBId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, mode=deactivated\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().mode).to.eql(\"deactivated\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Soft-deleted B не может войти -> 401",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseURL}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"username\":\"qa_analyst_{{runId}}\",\"password\":\"qaanls123\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin не может удалить себя -> 403",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseURL}}/admin/users/{{adminId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"403\", () => pm.response.to.have.status(403));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin не может деактивировать себя -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/users/{{adminId}}/status",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"is_active\":false}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"403\", () => pm.response.to.have.status(403));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin восстанавливает user B (реактивация)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/users/{{userBId}}/status",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"is_active\":true}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, is_active=true\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().is_active).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Восстановленный B может войти",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseURL}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"username\":\"qa_analyst_{{runId}}\",\"password\":\"qaanls123\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, роль analyst\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().role).to.eql(\"analyst\");",
+                  "});",
+                  "pm.collectionVariables.set(\"tokenB\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "25-acts",
+      "item": [
+        {
+          "name": "Acts content: PUBLIC акт (admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseURL}}/api/acts/102010098/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, PUBLIC, есть чанки\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.act.clearance).to.eql(\"PUBLIC\");",
+                  "  pm.expect(body.chunk_count).to.be.above(0);",
+                  "  pm.expect(body.full_text).to.not.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Acts content: PUBLIC акт (viewer)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenA}}" }],
+            "url": "{{baseURL}}/api/acts/102010098/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, viewer видит PUBLIC\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().act.clearance).to.eql(\"PUBLIC\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Acts content: SECRET акт (viewer) -> 403",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenA}}" }],
+            "url": "{{baseURL}}/api/acts/102010114/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"403, viewer не видит SECRET\", () => {",
+                  "  pm.response.to.have.status(403);",
+                  "  pm.expect(pm.response.json().code).to.eql(\"forbidden\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Acts content: SECRET акт (admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseURL}}/api/acts/102010114/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, admin видит SECRET\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().act.clearance).to.eql(\"SECRET\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Acts content: несуществующий акт -> 404",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseURL}}/api/acts/000000000/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"код act_not_found\", () => pm.expect(pm.response.json().code).to.eql(\"act_not_found\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Acts content: аноним -> 401",
+          "request": {
+            "method": "GET",
+            "url": "{{baseURL}}/api/acts/102010098/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clearance: viewer -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{tokenA}}" }
+            ],
+            "url": "{{baseURL}}/admin/acts/102010098/clearance",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"clearance\":\"SECRET\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"403\", () => pm.response.to.have.status(403));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clearance: невалидная метка -> 422",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/acts/102010098/clearance",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"clearance\":\"TOPSECRET\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"422\", () => pm.response.to.have.status(422));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clearance: несуществующий акт -> 404",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/acts/000000000/clearance",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"clearance\":\"SECRET\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"код act_not_found\", () => pm.expect(pm.response.json().code).to.eql(\"act_not_found\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clearance: аноним -> 401",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseURL}}/admin/acts/102010098/clearance",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"clearance\":\"SECRET\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test(\"401\", () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clearance: смена грифа PUBLIC -> INTERNAL (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/acts/102010098/clearance",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"clearance\":\"INTERNAL\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, clearance=INTERNAL\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().clearance).to.eql(\"INTERNAL\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Проверка: гриф изменился в content",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseURL}}/api/acts/102010098/content"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, clearance=INTERNAL\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().act.clearance).to.eql(\"INTERNAL\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Откат грифа INTERNAL -> PUBLIC",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": "{{baseURL}}/admin/acts/102010098/clearance",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\"clearance\":\"PUBLIC\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, clearance=PUBLIC (откат)\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().clearance).to.eql(\"PUBLIC\");",
+                  "});"
+                ]
               }
             }
           ]
