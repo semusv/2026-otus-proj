@@ -75,7 +75,9 @@ async def delete_user_cascade(session: AsyncSession, user_id: uuid.UUID) -> int:
         )
         or 0
     )
-    await session.execute(delete(ChatMessage).where(ChatMessage.chat_session_id.in_(chat_session_ids)))
+    await session.execute(
+        delete(ChatMessage).where(ChatMessage.chat_session_id.in_(chat_session_ids))
+    )
     await session.execute(delete(ChatSession).where(ChatSession.user_id == user_id))
     await session.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
     await session.execute(

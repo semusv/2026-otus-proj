@@ -186,6 +186,35 @@ class GraphRetriever:
             out["relationships"] = int(rel_rows[0]["c"]) if rel_rows else 0
         return out
 
+    @staticmethod
+    def _act_return() -> str:
+        """Общий RETURN для чтения свойств Act (порядок важен для _act_from_row)."""
+        return (
+            "a.id AS id, a.title AS title, a.doc_number AS doc_number,"
+            " a.date AS date, a.status AS status, a.clearance AS clearance"
+        )
+
+    async def get_act(self, act_id: str) -> dict[str, Any] | None:
+        """Метаданные акта по id (без текста; текст живёт в Qdrant-чанках)."""
+        async with self._driver.session() as session:
+            res = await session.run(
+                f"MATCH (a:Act {{id: $id}}) RETURN {self._act_return()}",
+                id=act_id,
+            )
+            rows: list[dict[str, Any]] = await res.data()
+        return rows[0] if rows else None
+
+    async def set_act_clearance(self, act_id: str, clearance: str) -> dict[str, Any] | None:
+        """Меняет метку доступа акта; возвращает обновлённые метаданные."""
+        async with self._driver.session() as session:
+            res = await session.run(
+                f"MATCH (a:Act {{id: $id}}) SET a.clearance = $c RETURN {self._act_return()}",
+                id=act_id,
+                c=clearance,
+            )
+            rows: list[dict[str, Any]] = await res.data()
+        return rows[0] if rows else None
+
     async def expand(
         self,
         seed_act_ids: list[str],

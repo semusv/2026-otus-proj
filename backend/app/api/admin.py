@@ -13,6 +13,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from qdrant_client import AsyncQdrantClient
+from qdrant_client import models as qmodels
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -20,6 +21,7 @@ from sqlalchemy.orm import joinedload
 from app.api.deps import audit_context, get_current_user
 from app.config import Settings
 from app.core.errors import (
+    ActNotFoundError,
     ForbiddenError,
     IngestAlreadyRunningError,
     LastAdminError,
@@ -34,6 +36,7 @@ from app.db.users import (
     other_active_admin_exists,
 )
 from app.ingestion.pipeline import IngestProgress, run_ingestion
+from app.schemas.acts import ActClearanceUpdate, ActOut
 from app.schemas.admin import (
     DeleteUserResponse,
     IngestStartResponse,
@@ -406,3 +409,61 @@ async def delete_user(
         )
         await session.commit()
     return DeleteUserResponse(user_id=str(user_id), username=username, mode="deactivated")
+
+
+@router.patch(
+    "/acts/{act_id}/clearance",
+    response_model=ActOut,
+    summary="Перекатегоризация акта: сменить гриф (Neo4j + payload чанков Qdrant)",
+    responses={
+        403: {"description": "Не admin"},
+        404: {"description": "Акт не найден"},
+        422: {"description": "Неизвестная метка доступа"},
+    },
+)
+async def change_act_clearance(
+    act_id: str,
+    payload: ActClearanceUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> ActOut:
+    """Ручная перекатегоризация (бэклог п.4). Метка меняется синхронно в двух
+    хранилищах: Neo4j Act.clearance (метаданные) и payload всех Qdrant-точек
+    акта - pre-fetch ACL ретриверов читает метку именно из payload. Доступ
+    пересчитывается мгновенно, перезапуск/переиндексация не нужны."""
+    _require_admin(user)
+
+    settings: Settings = request.app.state.settings
+    graph_retriever = request.app.state.graph_retriever
+
+    row = await graph_retriever.set_act_clearance(act_id, payload.clearance)
+    if row is None:
+        raise ActNotFoundError()
+
+    await request.app.state.qdrant_client.set_payload(
+        collection_name=settings.qdrant_collection,
+        payload={"clearance": payload.clearance},
+        points_selector=qmodels.Filter(
+            must=[qmodels.FieldCondition(key="act_id", match=qmodels.MatchAny(any=[act_id]))]
+        ),
+        wait=True,
+    )
+    session.add(
+        AuditLog(
+            action="admin.act_clearance_changed",
+            user_id=user.id,
+            detail={"act_id": act_id, "clearance": payload.clearance},
+            **audit_context(),
+        )
+    )
+    await session.commit()
+
+    return ActOut(
+        act_id=str(row.get("id", "")),
+        title=str(row.get("title") or ""),
+        doc_number=row.get("doc_number") or None,
+        date=row.get("date") or None,
+        status=row.get("status") or None,
+        clearance=payload.clearance,
+    )
