@@ -38,9 +38,15 @@ DIRECT_HTTP_CHECKS = [
 TRAEFIK_HTTP_CHECKS = [
     ("api.localhost", "/health", "backend"),
     ("neo4j.localhost", "/", "neo4j"),
-    ("jaeger.localhost", "/", "jaeger"),
-    ("prometheus.localhost", "-/healthy", "prometheus"),
-    ("grafana.localhost", "/api/health", "grafana"),
+]
+
+# Наблюдаемость - самостоятельный проект (graphrag-observability): прямые порты
+# на 127.0.0.1, traefik основного стека не участвует
+OBS_HTTP_CHECKS = [
+    # (сервис, env-переменная порта, дефолт, путь)
+    ("jaeger", "APP_JAEGER_UI_PORT", "16686", "/"),
+    ("prometheus", "APP_PROMETHEUS_PORT", "9090", "-/healthy"),
+    ("grafana", "APP_GRAFANA_PORT", "3000", "/api/health"),
 ]
 
 
@@ -158,6 +164,11 @@ def main() -> None:
 
     prefix = compose_cmd(args)
     running = get_compose_ps(prefix)
+    if args.with_obs:
+        # наблюдаемость живёт отдельным проектом - ps по его файлу
+        obs_prefix = ["docker", "compose", "-f",
+                      str(COMPOSE_DIR / "docker-compose.observability.yml")]
+        running.update(get_compose_ps(obs_prefix))
 
     rows, fails = check_containers(expected, running)
 
@@ -179,6 +190,13 @@ def main() -> None:
             continue
         fails += check_http(rows, "traefik", int(traefik_port), path,
                             host_header=host, label=host)
+
+    for svc, port_env, port_default, path in OBS_HTTP_CHECKS:
+        if svc not in expected:
+            rows.append((svc, "obs-direct", "SKIP", "сервис не в наборе"))
+            continue
+        fails += check_http(rows, "obs-direct", int(env.get(port_env, port_default)),
+                            path, label=f"{svc}:{path}")
 
     langfuse_url = env.get("LANGFUSE_URL", "")
     if langfuse_url:

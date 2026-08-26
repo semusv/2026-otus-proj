@@ -44,7 +44,7 @@
 | Секреты | Vault dev-mode стоит отдельно, backend читает env из compose | **Vault подключён к приложению**: seed-Job кладёт KV `secret/graphrag/app`, backend initContainer рендерит `/config/secrets.env` (модуль `app/infra/vault_fetch.py`) | Требование задания «управление секретами (Vault)» выполняется фактически; флаг `vault.enabled=false` откатывает на K8s Secret. Прод-эволюция: AppRole/K8s-auth вместо dev-root-token |
 | LLM Serving | LM Studio хоста через host.docker.internal | **LM Studio хоста через host.minikube.internal** (vLLM/GPU в кластер не тащим) | GPU passthrough в minikube docker-driver — отдельный большой риск вне MVP-объёма; контракт APP_LLM_* одинаков |
 | Langfuse | compose-стек graphrag-langfuse | **остаётся в Docker**, backend ходит через host.minikube.internal:3300 | Экономия RAM кластера (~2.4GB); отказоустойчивость к недоступности уже в коде (этап 7) |
-| Jaeger/Prom/Grafana | observability-профиль compose | **в кластер не дублируются** (`APP_TRACING_ENABLED=false` дефолт) | Демо наблюдаемости остаётся за compose; `/metrics` работает всегда |
+| Jaeger/Prom/Grafana | observability-профиль compose | **самостоятельный проект `graphrag-observability` на хосте** (порты 127.0.0.1, без traefik); кластер шлёт OTLP через host.minikube.internal:4318; Prometheus скрейпит k8s-бэкенд через ingress PF | Экономия RAM кластера; наблюдаемость независима от жизненного цикла обоих стеков и переиспользуется другими проектами |
 | Корпус | bind mount ../corpus_test | init-Job копирует corpus (3.2MB) на PVC | Пересборка образа не нужна |
 
 Ресурсная рамка (хост 64GB): minikube VM капится `--memory=12288 --cpus=6`; поды ≤8Gi

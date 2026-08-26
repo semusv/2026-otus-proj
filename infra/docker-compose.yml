@@ -49,7 +49,9 @@ services:
       APP_INGEST_CORPUS_DIR: /data/corpus
       APP_GUARDRAIL_USE_LLM: ${APP_GUARDRAIL_USE_LLM:-true}
       APP_TRACING_ENABLED: ${APP_TRACING_ENABLED:-true}
-      APP_OTEL_EXPORTER_ENDPOINT: ${APP_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      # Observability - ОТДЕЛЬНЫЙ проект (docker-compose.observability.yml):
+      # общей сети нет, ходим через host.docker.internal на опубликованный порт
+      APP_OTEL_EXPORTER_ENDPOINT: ${APP_OTEL_EXPORTER_ENDPOINT:-http://host.docker.internal:4318/v1/traces}
       # Langfuse (этап 7): опционально; недоступность не ломает чат
       APP_LANGFUSE_ENABLED: ${APP_LANGFUSE_ENABLED:-false}
       APP_LANGFUSE_URL: ${APP_LANGFUSE_URL:-}

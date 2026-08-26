@@ -1,3 +1,22 @@
+# ============================================================================
+# Observability self-hosted (самостоятельный стек, этап 10)
+#
+# Отдельный compose-проект (name: graphrag-observability) — по аналогии с
+# graphrag-langfuse: живёт независимо от основного стека, другие проекты
+# (compose-бэкенды, minikube-бэкенд) подключаются через host-порты:
+#   - трейсы OTLP/HTTP: http://127.0.0.1:4318/v1/traces
+#       из docker-контейнеров:  http://host.docker.internal:4318/v1/traces
+#       из подов minikube:      http://host.minikube.internal:4318/v1/traces
+#   - Jaeger UI:  http://127.0.0.1:16686
+#   - Prometheus: http://127.0.0.1:9090
+#   - Grafana:    http://127.0.0.1:3000  (APP_GRAFANA_ADMIN_USER/PASSWORD)
+#
+# Запуск: cd infra && docker compose -f docker-compose.observability.yml up -d
+# Сеть своя — ни Traefik, ни graphrag_edge не нужны (порты публикуются напрямую).
+# ============================================================================
+
+name: graphrag-observability
+
 services:
   otel-collector:
     image: ${APP_DOCKER_REGISTRY:-}otel/opentelemetry-collector-contrib:0.159.0
@@ -6,12 +25,12 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
-    # Порт для экспорта спанов ИЗ хост-процессов (интеграционные тесты этапа 7);
-    # в контейнере backend ходит по внутреннему имени otel-collector:4318
     ports:
+      # HTTP OTLP (трейсы) + gRPC; бинд ТОЛЬКО на localhost (закрытый контур)
       - "127.0.0.1:${APP_OTEL_HTTP_PORT:-4318}:4318"
+      - "127.0.0.1:${APP_OTEL_GRPC_PORT:-4317}:4317"
     networks:
-      - data
+      - obs
 
   jaeger:
     image: ${APP_DOCKER_REGISTRY:-}jaegertracing/all-in-one:1.74.0
@@ -19,15 +38,10 @@ services:
     restart: unless-stopped
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${APP_JAEGER_UI_PORT:-16686}:16686"
     networks:
-      - edge
-      - data
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: graphrag_edge
-      traefik.http.routers.jaeger.rule: Host(`jaeger.localhost`)
-      traefik.http.routers.jaeger.entrypoints: web
-      traefik.http.services.jaeger.loadbalancer.server.port: "16686"
+      - obs
 
   prometheus:
     image: ${APP_DOCKER_REGISTRY:-}prom/prometheus:v3.7.3
@@ -39,15 +53,10 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:${APP_PROMETHEUS_PORT:-9090}:9090"
     networks:
-      - edge
-      - data
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: graphrag_edge
-      traefik.http.routers.prometheus.rule: Host(`prometheus.localhost`)
-      traefik.http.routers.prometheus.entrypoints: web
-      traefik.http.services.prometheus.loadbalancer.server.port: "9090"
+      - obs
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9090/-/healthy || exit 1"]
       interval: 15s
@@ -65,27 +74,17 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      # JSON-дашборды (этап 7): путь ВНЕ /var/lib/grafana - иначе вложенный маунт
-      # конфликтует с томом grafana_data (Grafana падает на provisionинге)
+      # JSON-дашборды: путь ВНЕ /var/lib/grafana — иначе вложенный маунт
+      # конфликтует с томом grafana_data (урок этапа 7)
       - ./grafana/dashboards:/dashboards:ro
       - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${APP_GRAFANA_PORT:-3000}:3000"
     networks:
-      - edge
-      - data
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: graphrag_edge
-      traefik.http.routers.grafana.rule: Host(`grafana.localhost`)
-      traefik.http.routers.grafana.entrypoints: web
-      traefik.http.services.grafana.loadbalancer.server.port: "3000"
+      - obs
 
 networks:
-  edge:
-    external: true
-    name: graphrag_edge
-  data:
-    external: true
-    name: graphrag_data
+  obs:
 
 volumes:
   prometheus_data:

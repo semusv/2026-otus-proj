@@ -3,10 +3,14 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  # Все таргеты - через host.docker.internal: наблюдаемость живёт отдельным
+  # проектом (graphrag-observability) и не имеет общей сети с потребителями.
+  # Compose-бэкенд публикует 127.0.0.1:APP_BACKEND_PORT; k8s-бэкенд (этап 10)
+  # отдаётся через ingress port-forward :8080 (пока PF не запущен - down, норма).
   - job_name: backend
     static_configs:
-      - targets: ["backend:8000"]
+      - targets: ["host.docker.internal:8000"]
 
-  - job_name: vllm
+  - job_name: backend-k8s
     static_configs:
-      - targets: ["vllm:8000"]
+      - targets: ["host.docker.internal:8080"]

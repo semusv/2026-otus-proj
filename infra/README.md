@@ -15,14 +15,27 @@ Docker Compose стек платформы. Всё поднимается одн
 | neo4j | neo4j:5.26.30-community | Граф знаний Act/Authority/Topic/Concept (этап 4+) | Browser: http://neo4j.localhost , логин `neo4j` / `APP_NEO4J_PASSWORD`; bolt 7687 |
 | vault | hashicorp/vault:2.0.4 (dev-mode) | Хранение секретов (по заданию) | 127.0.0.1:`APP_VAULT_PORT` (8200), токен `APP_VAULT_DEV_ROOT_TOKEN` |
 
-### Наблюдаемость (`-f docker-compose.observability.yml`)
+### Наблюдаемость — самостоятельный проект `docker-compose.observability.yml` (этап 10)
+
+Отдельный compose-проект `graphrag-observability` (по аналогии с `graphrag-langfuse`):
+живёт независимо от основного стека, потребители (compose-бэкенды, minikube-бэкенд,
+хост-скрипты) подключаются через host-порты на 127.0.0.1. Traefik основного стека
+НЕ требуется — UI открываются при остановленном всём остальном.
 
 | Сервис | Образ | Зачем | Доступ |
 |---|---|---|---|
-| otel-collector | otel/opentelemetry-collector-contrib:0.159.0 | Приём OTLP-трейсов от backend → Jaeger | внутренний: grpc 4317 / http 4318 |
-| jaeger | jaegertracing/all-in-one:1.74.0 | Трейсы запросов | http://jaeger.localhost |
-| prometheus | prom/prometheus:v3.7.3 | Метрики; скрейпит `backend:8000/metrics` (+`vllm:8000` когда поднят) | http://prometheus.localhost |
-| grafana | grafana/grafana:12.3.11 | Дашборды; источники Prometheus+Jaeger провиженятся автоматически | http://grafana.localhost , `APP_GRAFANA_ADMIN_USER/PASSWORD` |
+| otel-collector | otel/opentelemetry-collector-contrib:0.159.0 | Приём OTLP-трейсов → Jaeger | `127.0.0.1:4318` (HTTP) / `4317` (gRPC); из контейнеров — `host.docker.internal`, из подов minikube — `host.minikube.internal` |
+| jaeger | jaegertracing/all-in-one:1.74.0 | Трейсы запросов | http://127.0.0.1:16686 |
+| prometheus | prom/prometheus:v3.7.3 | Метрики; job'ы `backend` (compose :8000) и `backend-k8s` (:8080 через ingress PF) | http://127.0.0.1:9090 |
+| grafana | grafana/grafana:12.3.11 | Дашборды; Prometheus+Jaeger провиженятся автоматически | http://127.0.0.1:3000 , `APP_GRAFANA_ADMIN_USER/PASSWORD` |
+
+Запуск/остановка:
+
+```powershell
+cd infra
+docker compose -f docker-compose.observability.yml up -d      # старт
+docker compose -f docker-compose.observability.yml stop       # стоп (данные томов целы)
+```
 
 ### LLM (опционально)
 
@@ -53,8 +66,8 @@ Copy-Item infra\.env.example infra\.env
 # 2. Поднять базовый стек
 docker compose -f infra/docker-compose.yml up -d
 
-# 2a. + наблюдаемость (jaeger/prometheus/grafana)
-docker compose -f infra/docker-compose.yml -f infra/docker-compose.observability.yml up -d
+# 2a. + наблюдаемость (отдельный проект graphrag-observability)
+docker compose -f infra/docker-compose.observability.yml up -d
 
 # 3. Проверить, что всё зелёное
 python scripts\smoke_infra.py --with-obs
@@ -73,10 +86,12 @@ docker compose -f infra/docker-compose.yml ps
 docker compose -f infra/docker-compose.yml logs -f neo4j
 
 # остановить всё (данные сохраняются в docker volumes)
-docker compose -f infra/docker-compose.yml -f infra/docker-compose.observability.yml down
+docker compose -f infra/docker-compose.yml down
+docker compose -f infra/docker-compose.observability.yml stop
 
 # полный сброс ВМЕСТЕ с данными (граф, векторы, метрики)
-docker compose -f infra/docker-compose.yml -f infra/docker-compose.observability.yml down -v
+docker compose -f infra/docker-compose.yml down -v
+docker compose -f infra/docker-compose.observability.yml down -v
 
 # пересобрать бэкенд после правок кода
 docker compose -f infra/docker-compose.yml up -d --build backend
@@ -91,9 +106,11 @@ docker compose -f infra/docker-compose.yml up -d --build backend
 2. Создать `.env` из шаблона (см. Быстрый старт), при необходимости поменять пароли/порты.
 3. `docker compose -f infra/docker-compose.yml up -d` — ядро (traefik, backend, postgres,
    qdrant, neo4j, vault). Neo4j первый раз стартует ~1–1.5 мин (healthcheck ждёт до 90 c).
-4. Добавить наблюдаемость: `... -f infra/docker-compose.observability.yml up -d`.
+4. Добавить наблюдаемость: `docker compose -f infra/docker-compose.observability.yml up -d`
+   (отдельный проект, порты на 127.0.0.1: jaeger 16686 / prometheus 9090 / grafana 3000).
 5. Проверка: `python scripts\smoke_infra.py --with-obs` — все строки OK.
-6. Открыть в браузере: grafana.localhost, jaeger.localhost, neo4j.localhost.
+6. Открыть в браузере: http://127.0.0.1:3000 (Grafana), http://127.0.0.1:16686 (Jaeger),
+   http://neo4j.localhost (Neo4j Browser, через traefik основного стека).
    Grafana спросит логин из `.env`; источники данных уже подключены.
 7. Для инференса — запустить LM Studio, включить сервер (порт 1234), загрузить модель
    (например `qwen/qwen3.5-9b`). Проверка: строка `llm ...` в smoke или

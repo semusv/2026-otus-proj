@@ -34,7 +34,14 @@
          -- http://qdrant:6333 -> [qdrant]      (PVC qdrant-data)
          -- postgres:5432 -----> [postgres]     (PVC pg-data)
          -- host.minikube.internal:1234/v1 --> LM Studio на хосте Windows (LLM)
-         -- host.minikube.internal:3300    --> Langfuse в Docker на хосте (трейсы)
+         -- host.minikube.internal:3300    --> Langfuse в Docker на хосте (трейсы промптов)
+         -- host.minikube.internal:4318    --> otel-collector проекта
+                                              graphrag-observability (трейсы -> Jaeger)
+
+Наблюдаемость (Jaeger/Prometheus/Grafana) - ОТДЕЛЬНЫЙ compose-проект на хосте:
+  cd infra && docker compose -f docker-compose.observability.yml up -d
+  Jaeger http://127.0.0.1:16686 | Prometheus :9090 | Grafana :3000
+  Prometheus job backend-k8s скрейпит бэкенд через ingress port-forward (:8080).
 
 Секреты:
   secrets.yaml --(helm)--> K8s Secret graphrag-secrets
@@ -176,6 +183,7 @@ minikube -p minikube delete           # опционально: снести в�
 | exec-сессия в backend не видит APP_JWT_SECRET | секреты из Vault попадают в env только PID 1 (через `. secrets.env` в команде пода) | в exec добавлять `sh -c ". /config/secrets.env && python -"` |
 | Поды старых тестовых стендов жрут память кластера | профиль minikube общий с учебными стендами (efk/kafka/prometheus/cnpg/ng/portainer) | они приостановлены: deploy/sts `--replicas=0`, daemonset'ам добавлен nodeSelector `paused.nonexistent=true`. Вернуть: снять nodeSelector патчем и scale обратно (напр. `kubectl patch ds metricbeat-metricbeat -n efk --type merge -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'`) |
 | Первый чат/ingestion «висят» минуты | bge-m3+reranker (~4.5GB) качаются с HF при первом использовании | норма; кэш живёт в PVC hf-cache, повторных скачиваний нет |
+| obs-порты 3000/9090 заняты при старте `graphrag-observability` | старый langfuse-проект (v2) поднялся после рестарта Docker из-за `restart: unless-stopped` и держит minio:9090/web:3000 | `docker compose -p langfuse stop` (данные в томах); правило «два langfuse не держать» |
 
 ## 8. Проверка ресурсов
 

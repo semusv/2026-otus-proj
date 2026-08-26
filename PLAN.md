@@ -711,11 +711,14 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
   in-process ~4.5GB при прогреве), neo4j lim 2Gi (heap 1G + pagecache 512M env), qdrant lim 1Gi,
   postgres lim 512Mi, frontend ~128Mi, ingress ~256Mi, vault ~64Mi. Контроль: kubectl top +
   снапшоты docker stats до/во время/после;
-- **Доступ без прав администратора:** hosts-файл НЕ трогаем. Один catch-all Ingress на IP ноды
-  (`http://192.168.49.2`): `/api,/auth,/admin,/health,/metrics,/docs,/openapi.json` → backend:8000
-  (аннотации SSE: proxy-buffering off, read-timeout 300s), `/` → frontend. Newman gate идёт на
-  `-BaseUrl http://192.168.49.2`. Fallback — NodePort Service бэкенда. Именованные хосты
-  (`api.graphrag.local`) — опционально values-флагом для тех, у кого есть права на hosts;
+- **Доступ без прав администратора:** hosts-файл НЕ трогаем. Вход в кластер — один catch-all
+  Ingress (nginx addon), наружу отдаётся `kubectl port-forward svc/ingress-nginx-controller 8080:80`
+  → `http://localhost:8080` ведёт себя как полноценный ingress-host (path-routing + SSE-аннотации;
+  IP ноды 192.168.49.x из Windows в docker-driver не маршрутизируется — kubeconfig сам ходит через
+  localhost-прокси Docker Desktop). Пути: `/api,/auth,/admin,/health,/metrics,/docs,/openapi.json`
+  → backend:8000 (аннотации SSE: proxy-buffering off, read-timeout 300s), `/` → frontend.
+  Newman gate идёт на `-BaseUrl http://127.0.0.1:8080`; проверка ingress'а дублируется curl-подом
+  изнутри кластера;
 - **Traefik в кластере НЕ разворачивается** (nginx ingress addon вместо него) — отклонение от
   compose-схемы зафиксировано в ADR-010 (дополнение); Traefik остаётся шлюзом compose-стека;
 - **Секреты через Vault (требование задания):** chart ставит Vault dev-mode Deployment+Service
@@ -733,9 +736,16 @@ SSE-эндпоинт `POST /api/chat`, fallback-статусы `degraded`/`empty
   `APP_LANGFUSE_ENABLED=true`, `APP_LANGFUSE_URL=http://host.minikube.internal:3300` — трейсы
   k8s-прогона попадают в живой Langfuse без затрат RAM кластера (backend отказоустойчив к его
   недоступности, уроки этапа 7);
-- **Observability в кластер не дублируется** (Jaeger/Prometheus/Grafana остаются опцией compose):
-  `APP_TRACING_ENABLED=false` по умолчанию в values (флагом включается, если коллектор доступен);
-  `/metrics` бэкенда работает всегда (newman проверяет);
+- **Observability тоже на хосте, отдельным проектом** (`infra/docker-compose.observability.yml`,
+  project `graphrag-observability`, по аналогии с langfuse): otel-collector/jaeger/prometheus/
+  grafana публикуют порты на 127.0.0.1 (4318/16686/9090/3000), БЕЗ traefik и общих сетей —
+  UI живут при остановленном всём остальном, другие проекты подключаются так же.
+  K8s-бэкенд шлёт OTLP на `http://host.minikube.internal:4318/v1/traces`
+  (`tracingEnabled=true` в values); Prometheus имеет job `backend-k8s` →
+  `host.docker.internal:8080/metrics` через ingress port-forward (пока PF не поднят,
+  таргет down — норма). Compose-бэкенд переключён на тот же механизм
+  (`host.docker.internal:4318` вместо внутреннего имени otel-collector);
+  `/metrics` бэкенда работает всегда;
 - **Корпус в кластере:** corpus_test мал (100 файлов / 3.2MB) → init-Job из мини-образа
   (alpine + COPY corpus) копирует XML на PVC `corpus-pvc`, backend монтирует ro в /data/corpus.
   Пересборка образа backend не нужна;
