@@ -1,5 +1,5 @@
-"""Инфраструктурные утилиты этапа 10 (minikube/Helm): интеграция с Vault."""
+"""Инфраструктурные утилиты этапа 10 (minikube/Helm): интеграция с Vault.
 
-from app.infra.vault_fetch import api_path, fetch, render_env, run
-
-__all__ = ["api_path", "fetch", "render_env", "run"]
+Реализация - в app.infra.vault_fetch (импортируйте напрямую оттуда;
+реэкспорт здесь ломает `python -m app.infra.vault_fetch` двойным импортом).
+"""

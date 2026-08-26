@@ -26,6 +26,9 @@ data:
   APP_INGEST_EXTRACT_CONCEPTS: {{ .Values.app.ingestExtractConcepts | quote }}
   APP_GUARDRAIL_USE_LLM: {{ .Values.app.guardrailUseLlm | quote }}
   APP_TRACING_ENABLED: {{ .Values.app.tracingEnabled | quote }}
+  {{- if eq .Values.app.tracingEnabled "true" }}
+  APP_OTEL_EXPORTER_ENDPOINT: {{ .Values.app.otelExporterEndpoint | quote }}
+  {{- end }}
   APP_LANGFUSE_ENABLED: {{ .Values.app.langfuseEnabled | quote }}
   APP_LANGFUSE_URL: {{ .Values.app.langfuseUrl | quote }}
   HF_HOME: /hf-cache/huggingface

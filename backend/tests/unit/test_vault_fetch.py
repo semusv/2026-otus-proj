@@ -24,8 +24,8 @@ def test_render_env_keeps_only_app_keys_and_escapes_quotes() -> None:
         }
     )
     lines = rendered.splitlines()
-    assert "APP_JWT_SECRET='ab'\\''c'" in lines
-    assert "APP_LANGFUSE_PUBLIC_KEY='pk'" in lines
+    assert "export APP_JWT_SECRET='ab'\\''c'" in lines
+    assert "export APP_LANGFUSE_PUBLIC_KEY='pk'" in lines
     assert len(lines) == 2
 
 
@@ -54,7 +54,7 @@ def test_run_writes_file_after_retry_on_404(tmp_path) -> None:
     assert secrets["APP_JWT_SECRET"] == "s3cret"
     assert len(calls) == 2
     content = out_file.read_text(encoding="utf-8")
-    assert "APP_JWT_SECRET='s3cret'" in content
+    assert "export APP_JWT_SECRET='s3cret'" in content
     assert "OTHER" not in content
 
 

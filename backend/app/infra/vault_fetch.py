@@ -43,14 +43,19 @@ def api_path(kv_path: str) -> str:
 
 
 def render_env(secrets: Mapping[str, object]) -> str:
-    """APP_*-ключи -> строки KEY='value' (безопасно для `. file`)."""
+    """APP_*-ключи -> строки `export KEY='value'`.
+
+    export обязателен: файл исполняется как `. /config/secrets.env`, и без
+    export переменные остались бы shell-переменными текущего sh, не попав
+    в окружение дочерних процессов (alembic/uvicorn).
+    """
     lines = []
     for key in sorted(secrets):
         if not key.startswith("APP_"):
             continue
         value = str(secrets[key])
         escaped = value.replace("'", "'\\''")
-        lines.append(f"{key}='{escaped}'")
+        lines.append(f"export {key}='{escaped}'")
     return "\n".join(lines) + ("\n" if lines else "")
 
 
