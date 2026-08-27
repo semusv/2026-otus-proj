@@ -88,7 +88,8 @@ spec:
               mountPath: /hf-cache
             - name: corpus
               mountPath: {{ .Values.app.ingestCorpusDir }}
-              readOnly: true
+              # rw: POST /admin/documents пишет XML на corpus-pvc
+              readOnly: false
             {{- if $vaultEnabled }}
             - name: app-secrets
               mountPath: /config

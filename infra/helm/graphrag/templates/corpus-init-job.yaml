@@ -1,5 +1,6 @@
 # Заливка корпуса XML (corpus_test, ~3.2MB) из мини-образа на PVC.
-# Backend монтирует тот же PVC read-only в /data/corpus (APP_INGEST_CORPUS_DIR).
+# Backend монтирует тот же PVC в /data/corpus (APP_INGEST_CORPUS_DIR);
+# маунт rw - корпус пополняется и через POST /admin/documents, и kubectl cp.
 apiVersion: batch/v1
 kind: Job
 metadata:
