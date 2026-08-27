@@ -10,6 +10,10 @@ LangGraph-агент, гибридный поиск (Qdrant + Neo4j), RBAC, на
 | **Compose** (разработка) | `docker compose -f infra/docker-compose.yml up -d` | `infra/README.md` |
 | **Minikube/Helm** (целевой, этап 10) | `make k8s-up` → http://localhost:8080 | `docs/minikube-deployment.md` |
 
+Тестирование (пирамида, последовательности, гигиена данных): [tests/README.md](tests/README.md).
+Коротко: `make lint` → `make test-unit` → `make test-integration` → `make test-postman`
+(для последнего нужен поднятый стек и LM Studio).
+
 Быстрый старт в minikube (предпосылки и полный runbook — в
 [docs/minikube-deployment.md](docs/minikube-deployment.md)):
 
