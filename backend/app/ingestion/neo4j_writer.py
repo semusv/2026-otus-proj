@@ -62,6 +62,21 @@ class Neo4jWriter:
         async with self._driver.session() as session:
             await session.run("MATCH (n) DETACH DELETE n")
 
+    async def delete_act(self, act_id: str) -> None:
+        """Удаляет акт со всеми связями (файл удалён из корпуса).
+
+        Concept/Topic - общие справочные узлы: чистим только осиротевшие
+        (оставшиеся без входящих рёбер от актов).
+        """
+        async with self._driver.session() as session:
+            await session.run("MATCH (a:Act {id: $id}) DETACH DELETE a", id=act_id)
+            await session.run(
+                "MATCH (c:Concept) WHERE NOT exists { ()-[:MENTIONS]->(c) } DELETE c"
+            )
+            await session.run(
+                "MATCH (t:Topic) WHERE NOT exists { ()-[:HAS_TOPIC]->(t) } DELETE t"
+            )
+
     async def counts_by_label(self) -> dict[str, int]:
         """Счётчики узлов по меткам (для smoke/тестов)."""
         query = (

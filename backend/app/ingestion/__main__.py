@@ -1,7 +1,8 @@
-"""CLI ingestion: python -m app.ingestion [--dir PATH] [--no-concepts] [--concepts-only]
+"""CLI ingestion: python -m app.ingestion [--dir PATH] [--full] [--no-concepts] [--concepts-only]
 
 Запускается с хоста (env из infra/.env подтягивается автоматически) или из
 контейнера backend (corpus смонтирован в APP_INGEST_CORPUS_DIR).
+Прогон по умолчанию инкрементальный (снапшот в PG); ``--full`` пересчитывает всё.
 """
 
 import argparse
@@ -12,13 +13,19 @@ import sys
 from pathlib import Path
 
 from app.config import Settings, load_env_file_into_environ
-from app.ingestion.pipeline import run_ingestion
+from app.db.base import Database
+from app.ingestion.pipeline import IngestStats, run_ingestion
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.ingestion", description="Ingestion RusLawOD")
     parser.add_argument(
         "--dir", type=Path, default=None, help="Каталог XML (по умолчанию APP_INGEST_CORPUS_DIR)"
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Полный прогон: игнорировать снапшот, пересчитать все файлы",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -36,9 +43,21 @@ def main(argv: list[str] | None = None) -> int:
     corpus_dir: Path = args.dir or settings.ingest_corpus_dir
     extract = True if args.concepts else False if args.no_concepts else None
 
-    stats = asyncio.run(
-        run_ingestion(settings, corpus_dir, extract_concepts=extract)
-    )
+    db = Database(settings)
+
+    async def _run() -> IngestStats:
+        try:
+            return await run_ingestion(
+                settings,
+                corpus_dir,
+                extract_concepts=extract,
+                session_factory=db.session_factory,
+                full=args.full,
+            )
+        finally:
+            await db.dispose()
+
+    stats = asyncio.run(_run())
     print(json.dumps(stats.__dict__, ensure_ascii=False, indent=2, default=list))
     return 1 if stats.parse_errors and stats.acts_parsed == 0 else 0
 

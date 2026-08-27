@@ -1,11 +1,17 @@
 """Оркестратор ingestion-конвейера: XML -> чанки -> векторы/понятия -> Qdrant + Neo4j.
 
 Порядок (см. PLAN.md, этап 4 и dataflow):
-1. Парсинг всех XML корпуса; сбор id для фильтра REFERENCES.
-2. ensure_collection / ensure_schema.
-3. Для каждого акта: clean -> chunk -> embed -> upsert Qdrant (с предварительным
-   delete по act_id - чистый ре-ingest) -> экстракция Concepts (опционально) ->
-   MERGE в Neo4j.
+1. Парсинг ВСЕХ XML корпуса (дёшево); сбор id для фильтра REFERENCES.
+2. Инкрементальный план по sha256 (снапшот прошлого прогона в PG, таблица
+   ingest_files): unchanged - только дешёвый граф-рефреш; changed/added -
+   полный путь (chunk -> embed -> upsert -> concepts -> MERGE); removed -
+   зачистка актов из Qdrant и Neo4j.
+3. ensure_collection / ensure_schema.
+4. Запись нового снапшота корпуса.
+
+``full=True`` игнорирует снапшот и пересчитывает всё (смена чанкера/модели
+эмбеддингов/процентов грифа). Без ``session_factory`` снапшот недоступен -
+прогон идёт как полный (режим unit-тестов на стабах).
 """
 
 import asyncio
@@ -15,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
@@ -23,6 +30,13 @@ from app.ingestion.cleaner import clean_text
 from app.ingestion.clearance import resolve_clearance
 from app.ingestion.concepts import ConceptExtractor
 from app.ingestion.embeddings import Embedder, EmbeddingBackend
+from app.ingestion.incremental import (
+    FileSnapshot,
+    IncrementalPlan,
+    plan_incremental,
+    scan_files,
+    sha256_bytes,
+)
 from app.ingestion.neo4j_writer import Neo4jWriter
 from app.ingestion.ontology import filter_references, topics_of
 from app.ingestion.parser import ParsedAct, parse_act
@@ -42,6 +56,11 @@ class IngestStats:
     parse_errors: list[str] = field(default_factory=list)
     chunks_written: int = 0
     concepts_extracted: int = 0
+    # инкрементальный режим (бэклог п.1)
+    files_skipped: int = 0
+    files_added: int = 0
+    files_changed: int = 0
+    files_removed: int = 0
 
 
 @dataclass
@@ -75,6 +94,52 @@ async def _persist(
         await session.commit()
 
 
+async def _load_snapshot(
+    session_factory: async_sessionmaker | None,
+) -> dict[str, FileSnapshot]:
+    """Снапшот корпуса прошлого прогона; без БД - пустой (полный прогон)."""
+    if session_factory is None:
+        logger.info("Снапшот корпуса недоступен (нет БД) - прогон идёт как полный")
+        return {}
+    from sqlalchemy import select
+
+    from app.db.models import IngestFile
+
+    async with session_factory() as session:
+        rows = (await session.execute(select(IngestFile))).scalars().all()
+    return {
+        row.filename: FileSnapshot(
+            sha256=row.sha256,
+            act_ids=tuple(row.act_ids or []),
+            chunks_count=row.chunks_count,
+        )
+        for row in rows
+    }
+
+
+async def _save_snapshot(
+    session_factory: async_sessionmaker | None,
+    records: dict[str, FileSnapshot],
+) -> None:
+    """Перезаписать снапшот корпуса текущим состоянием (таблица мала - целиком)."""
+    if session_factory is None:
+        return
+    from app.db.models import IngestFile
+
+    async with session_factory() as session:
+        await session.execute(sa_delete(IngestFile))
+        session.add_all(
+            IngestFile(
+                filename=name,
+                sha256=snap.sha256,
+                act_ids=list(snap.act_ids),
+                chunks_count=snap.chunks_count,
+            )
+            for name, snap in records.items()
+        )
+        await session.commit()
+
+
 async def run_ingestion(
     settings: Settings,
     corpus_dir: Path,
@@ -84,21 +149,22 @@ async def run_ingestion(
     progress: IngestProgress | None = None,
     run_id: uuid.UUID | None = None,
     session_factory: async_sessionmaker | None = None,
+    full: bool = False,
 ) -> IngestStats:
-    """Полный прогон ingestion по каталогу XML-файлов.
+    """Прогон ingestion по каталогу XML-файлов (по умолчанию инкрементальный).
 
     ``embedder`` - точка расширения для тестов (стаб с детерминированными
     векторами); по умолчанию создаётся реальный bge-m3 (ADR-009).
     ``progress`` - необязательный объект живого прогресса для API-статуса.
-    ``run_id`` / ``session_factory`` - опциональная персистентность в ingestion_runs.
+    ``run_id`` / ``session_factory`` - персистентность прогона и снапшота корпуса.
+    ``full=True`` - форс-полный прогон (игнорировать снапшот).
     """
     stats = IngestStats()
     do_concepts = (
         settings.ingest_extract_concepts if extract_concepts is None else extract_concepts
     )
 
-    # ASYNC240: каталог локальный, листинг мгновенный; anyio.Path избыточен
-    xml_files = sorted(corpus_dir.glob("*.xml"))  # noqa: ASYNC240
+    xml_files = scan_files(corpus_dir)
     stats.files_total = len(xml_files)
     if not xml_files:
         logger.warning("В каталоге %s нет XML-файлов", corpus_dir)
@@ -108,28 +174,58 @@ async def run_ingestion(
         progress.stage, progress.files_done, progress.files_total = "parse", 0, len(xml_files)
     await _persist(session_factory, run_id, stage="parse", files_done=0, files_total=len(xml_files))
     logger.info(
-        "Ingestion запущен: файлов=%d, concepts=%s, корпус=%s",
+        "Ingestion запущен: файлов=%d, concepts=%s, корпус=%s, full=%s",
         len(xml_files),
         do_concepts,
         corpus_dir,
+        full,
     )
 
     acts: list[ParsedAct] = []
+    parsed_by_file: dict[str, list[ParsedAct]] = {}
+    current_hashes: dict[str, str] = {}
     for path in xml_files:
         try:
-            acts.append(parse_act(path.read_bytes()))
+            raw = path.read_bytes()
+            act = parse_act(raw)
+            acts.append(act)
+            parsed_by_file.setdefault(path.name, []).append(act)
+            current_hashes[path.name] = sha256_bytes(raw)
         except Exception as exc:  # битые файлы не останавливают прогон
             stats.parse_errors.append(f"{path.name}: {exc}")
             logger.warning("Файл не разобран: %s", exc)
     stats.acts_parsed = len(acts)
     corpus_ids = {act.id for act in acts}
-    if progress is not None:
-        progress.files_done = stats.acts_parsed + len(stats.parse_errors)
-    await _persist(session_factory, run_id, files_done=stats.acts_parsed + len(stats.parse_errors))
+
+    previous = await _load_snapshot(session_factory)
+    plan: IncrementalPlan = plan_incremental(previous, current_hashes, full=full)
+    stats.files_skipped = len(plan.unchanged)
+    stats.files_added = len(plan.added)
+    stats.files_changed = len(plan.changed)
+    stats.files_removed = len(plan.removed)
     logger.info(
-        "Парсинг завершён: актов=%d, ошибок разбора=%d",
-        stats.acts_parsed,
-        len(stats.parse_errors),
+        "Инкрементальный план: новых=%d, изменённых=%d, без изменений=%d, удалено=%d",
+        stats.files_added,
+        stats.files_changed,
+        stats.files_skipped,
+        stats.files_removed,
+    )
+
+    # Зачистка: файлы, исчезнувшие из каталога + изменившиеся файлы, которые
+    # больше не парсятся (старые акты - в мусор по act_ids из снапшота)
+    stale_act_ids: list[str] = []
+    for name in plan.removed:
+        stale_act_ids.extend(previous[name].act_ids)
+    for name in plan.to_process:
+        if not parsed_by_file.get(name) and name in previous:
+            stale_act_ids.extend(previous[name].act_ids)
+
+    if progress is not None:
+        progress.files_done = stats.files_skipped + len(stats.parse_errors)
+    await _persist(
+        session_factory,
+        run_id,
+        files_done=stats.files_skipped + len(stats.parse_errors),
     )
 
     embedder = embedder or Embedder(
@@ -146,99 +242,147 @@ async def run_ingestion(
     )
 
     try:
-        # первая загрузка модели (torch + веса с диска/HF) занимает десятки секунд -
-        # только в потоке, иначе блокируем event loop и API перестаёт отвечать
-        if progress is not None:
-            progress.stage = "model"
-        await _persist(session_factory, run_id, stage="model")
-        logger.info("Загрузка модели эмбеддингов (%s)...", settings.embedding_model)
-        dim = await asyncio.to_thread(lambda: embedder.dim)
-        logger.info("Модель готова (dim=%d), проверка коллекции/схемы", dim)
-        await qdrant.ensure_collection(dim)
-        await neo4j.ensure_schema()
+        # Тяжёлая модель нужна только для файлов с полным путём обработки;
+        # загрузка (torch + веса) занимает десятки секунд - только в потоке,
+        # иначе блокируем event loop и API перестаёт отвечать
+        if plan.to_process:
+            if progress is not None:
+                progress.stage = "model"
+            await _persist(session_factory, run_id, stage="model")
+            logger.info("Загрузка модели эмбеддингов (%s)...", settings.embedding_model)
+            dim = await asyncio.to_thread(lambda: embedder.dim)
+            logger.info("Модель готова (dim=%d), проверка коллекции/схемы", dim)
+            await qdrant.ensure_collection(dim)
+            await neo4j.ensure_schema()
+        else:
+            await neo4j.ensure_schema()
 
+        # 1. Зачистка удалённых/сломанных (дешёвые delete, без модели)
+        for act_id in stale_act_ids:
+            await qdrant.delete_act(act_id)
+            await neo4j.delete_act(act_id)
+        if stale_act_ids:
+            logger.info("Зачищено актов удалённых/сломанных файлов: %d", len(stale_act_ids))
+
+        # 2. Дешёвый граф-рефреш unchanged-файлов: детерминированная часть без
+        # эмбеддингов/LLM - старые акты получают REFERENCES на новые
+        for name in plan.unchanged:
+            for act in parsed_by_file.get(name, []):
+                await neo4j.upsert_act(
+                    act,
+                    clearance=resolve_clearance(
+                        act.id,
+                        internal_percent=settings.ingest_internal_percent,
+                        secret_percent=settings.ingest_secret_percent,
+                    ),
+                    topics=list(topics_of(act)),
+                    ref_ids=list(filter_references(act, corpus_ids)),
+                )
+        if plan.unchanged:
+            logger.info("Граф-рефреш без изменений: файлов=%d", len(plan.unchanged))
+
+        # 3. Полный путь обработки только для дельты
         extractor = ConceptExtractor(
             LLMClient(_llm_config(settings)),
             max_per_chunk=settings.ingest_concept_max_per_chunk,
         )
         semaphore = asyncio.Semaphore(_CONCURRENCY)
+        records: dict[str, FileSnapshot] = {
+            name: previous[name] for name in plan.unchanged if name in previous
+        }
 
-        total_acts = len(acts)
+        total_acts = sum(len(parsed_by_file.get(name, [])) for name in plan.to_process)
+        processed_acts = 0
         next_milestone = 1  # очередная граница ~10% для INFO-лога прогресса
-        for idx, act in enumerate(acts, start=1):
-            clearance = resolve_clearance(
-                act.id,
-                internal_percent=settings.ingest_internal_percent,
-                secret_percent=settings.ingest_secret_percent,
-            )
-            chunks = chunk_act(
-                clean_text(act.text),
-                max_chars=settings.chunk_max_chars,
-                overlap_chars=settings.chunk_overlap_chars,
-            )
+        if progress is not None:
+            progress.stage = "processing"
+        await _persist(session_factory, run_id, stage="processing")
 
-            # encode блокирует GIL надолго (torch/CPU) - только в отдельном потоке,
-            # иначе event loop стоит и API перестаёт отвечать на время прогона
-            vectors = await asyncio.to_thread(embedder.encode, [c.text for c in chunks])
-            await qdrant.delete_act(act.id)
-            stats.chunks_written += await qdrant.upsert_chunks(
-                [
-                    VectorChunk(
-                        chunk=c,
-                        vector=v,
-                        act_id=act.id,
-                        act_title=act.title,
-                        clearance=clearance,
-                    )
-                    for c, v in zip(chunks, vectors, strict=True)
-                ]
-            )
-
-            concepts: list[str] = []
-            if do_concepts and chunks:
-                results = await asyncio.gather(
-                    *(_extract_with_semaphore(semaphore, extractor, c.text) for c in chunks)
+        for name in plan.to_process:
+            file_acts = parsed_by_file.get(name, [])
+            file_chunks = 0
+            for act in file_acts:
+                clearance = resolve_clearance(
+                    act.id,
+                    internal_percent=settings.ingest_internal_percent,
+                    secret_percent=settings.ingest_secret_percent,
                 )
-                seen: set[str] = set()
-                for names in results:
-                    for name in names:
-                        key = name.casefold()
-                        if key not in seen:
-                            seen.add(key)
-                            concepts.append(name)
-                stats.concepts_extracted += len(concepts)
+                chunks = chunk_act(
+                    clean_text(act.text),
+                    max_chars=settings.chunk_max_chars,
+                    overlap_chars=settings.chunk_overlap_chars,
+                )
 
-            await neo4j.upsert_act(
-                act,
-                clearance=clearance,
-                topics=list(topics_of(act)),
-                ref_ids=list(filter_references(act, corpus_ids)),
-                concepts=concepts,
-            )
-            logger.debug(
-                "Акт %s (%d/%d): чанков=%d, clearance=%s, concepts=%d",
-                act.id,
-                idx,
-                total_acts,
-                len(chunks),
-                clearance,
-                len(concepts),
+                # encode блокирует GIL надолго (torch/CPU) - только в отдельном потоке
+                vectors = await asyncio.to_thread(embedder.encode, [c.text for c in chunks])
+                await qdrant.delete_act(act.id)
+                stats.chunks_written += await qdrant.upsert_chunks(
+                    [
+                        VectorChunk(
+                            chunk=c,
+                            vector=v,
+                            act_id=act.id,
+                            act_title=act.title,
+                            clearance=clearance,
+                        )
+                        for c, v in zip(chunks, vectors, strict=True)
+                    ]
+                )
+                file_chunks += len(chunks)
+
+                concepts: list[str] = []
+                if do_concepts and chunks:
+                    results = await asyncio.gather(
+                        *(_extract_with_semaphore(semaphore, extractor, c.text) for c in chunks)
+                    )
+                    seen: set[str] = set()
+                    for names in results:
+                        for cname in names:
+                            key = cname.casefold()
+                            if key not in seen:
+                                seen.add(key)
+                                concepts.append(cname)
+                    stats.concepts_extracted += len(concepts)
+
+                await neo4j.upsert_act(
+                    act,
+                    clearance=clearance,
+                    topics=list(topics_of(act)),
+                    ref_ids=list(filter_references(act, corpus_ids)),
+                    concepts=concepts,
+                )
+                processed_acts += 1
+                logger.debug(
+                    "Акт %s (%s/%d): чанков=%d, clearance=%s, concepts=%d",
+                    act.id,
+                    name,
+                    total_acts,
+                    len(chunks),
+                    clearance,
+                    len(concepts),
+                )
+            records[name] = FileSnapshot(
+                sha256=current_hashes[name],
+                act_ids=tuple(a.id for a in file_acts),
+                chunks_count=file_chunks,
             )
             if progress is not None:
-                progress.stage = "processing"
-                progress.files_done = idx
-                progress.chunks_done = stats.chunks_written
-            percent = idx * 100 // total_acts
-            if percent >= next_milestone * 10 or idx == total_acts:
-                await _persist(
-                    session_factory, run_id,
-                    stage="processing", files_done=idx, chunks_done=stats.chunks_written,
+                progress.files_done = (
+                    stats.files_skipped + len(stats.parse_errors) + processed_acts
                 )
-            if percent >= next_milestone * 10 or idx == total_acts:
+                progress.chunks_done = stats.chunks_written
+            await _persist(
+                session_factory,
+                run_id,
+                files_done=stats.files_skipped + len(stats.parse_errors) + processed_acts,
+                chunks_done=stats.chunks_written,
+            )
+            percent = processed_acts * 100 // total_acts if total_acts else 100
+            if percent >= next_milestone * 10 or name == plan.to_process[-1]:
                 logger.info(
                     "Прогресс %d%%: актов %d/%d, чанков всего=%d",
                     min(percent, 100),
-                    idx,
+                    processed_acts,
                     total_acts,
                     stats.chunks_written,
                 )
@@ -250,8 +394,16 @@ async def run_ingestion(
             progress.stage = "done"
         await _persist(session_factory, run_id, stage="done")
 
+    await _save_snapshot(session_factory, records)
+
     logger.info(
-        "Ingestion завершён: актов=%d, чанков=%d, concepts=%d, ошибок парсинга=%d",
+        "Ingestion завершён: файлов=%d (новых=%d, изменённых=%d, пропущено=%d, удалено=%d), "
+        "актов=%d, чанков=%d, concepts=%d, ошибок парсинга=%d",
+        stats.files_total,
+        stats.files_added,
+        stats.files_changed,
+        stats.files_skipped,
+        stats.files_removed,
         stats.acts_parsed,
         stats.chunks_written,
         stats.concepts_extracted,
