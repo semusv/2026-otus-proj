@@ -22,7 +22,7 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $jsonReport = Join-Path $resultsDir "newman-$stamp.json"
 
 # gate гоняет только безопасные папки; запуск ingestion - строго opt-in
-$folders = @("00-system", "10-auth", "20-users", "25-acts", "30-ingest", "40-chat-rbac")
+$folders = @("00-system", "10-auth", "20-users", "25-acts", "30-ingest", "35-documents", "40-chat-rbac")
 if ($IngestRun) { $folders += "ingest-run OPTIONAL full ingestion" }
 
 $args = @(

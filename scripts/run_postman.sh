@@ -24,7 +24,7 @@ set -- \
     --reporter-json-export "$JSON_REPORT"
 
 # gate гоняет только безопасные папки; запуск ingestion - строго opt-in
-FOLDERS="00-system 10-auth 20-users 30-ingest 40-chat-rbac"
+FOLDERS="00-system 10-auth 20-users 25-acts 30-ingest 35-documents 40-chat-rbac"
 if [ "${INGEST_RUN:-0}" = "1" ]; then
     FOLDERS="$FOLDERS ingest-run OPTIONAL full ingestion"
 fi
