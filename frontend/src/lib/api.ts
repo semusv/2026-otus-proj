@@ -24,6 +24,7 @@ export type UsersListResponse = components['schemas']['UsersListResponse']
 export type DeleteUserResponse = components['schemas']['DeleteUserResponse']
 export type ActContentResponse = components['schemas']['ActContentResponse']
 export type ActOut = components['schemas']['ActOut']
+export type DocumentsUploadResponse = components['schemas']['DocumentsUploadResponse']
 
 export class ApiError extends Error {
   readonly status: number
@@ -128,12 +129,28 @@ export function me(): Promise<MeResponse> {
   return request<MeResponse>('/auth/me')
 }
 
-export function startIngest(): Promise<IngestStartResponse> {
-  return request<IngestStartResponse>('/admin/ingest', { method: 'POST' })
+export function startIngest(full = false): Promise<IngestStartResponse> {
+  return request<IngestStartResponse>(`/admin/ingest${full ? '?full=true' : ''}`, {
+    method: 'POST',
+  })
 }
 
 export function ingestStatus(): Promise<IngestStatusResponse> {
   return request<IngestStatusResponse>('/admin/ingest/status')
+}
+
+/**
+ * Загрузка XML в корпус — admin-only. Файлы ТОЛЬКО сохраняются в
+ * каталог корпуса; прогон запускается отдельно (startIngest, инкрементально).
+ * Content-Type не ставим — браузер сам подставит multipart-границу.
+ */
+export function uploadDocuments(files: File[]): Promise<DocumentsUploadResponse> {
+  const form = new FormData()
+  for (const file of files) form.append('files', file, file.name)
+  return request<DocumentsUploadResponse>('/admin/documents', {
+    method: 'POST',
+    body: form,
+  })
 }
 
 /** Агрегаты наполнения хранилищ (Qdrant/Neo4j/PG) — admin-only, этап 8. */

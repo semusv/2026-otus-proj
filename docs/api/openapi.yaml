@@ -121,8 +121,21 @@ paths:
     post:
       tags:
       - admin
-      summary: Запустить ingestion корпуса (background task)
+      summary: Запустить ingestion корпуса (background task; по умолчанию инкрементальный)
+      description: 'full=true - форс-полный прогон (пересчёт всех файлов: смена чанкера,
+
+        модели эмбеддингов или процентов грифа). По умолчанию обрабатывается
+
+        только дельта корпуса по sha256 (таблица ingest_files).'
       operationId: start_ingest_admin_ingest_post
+      parameters:
+      - name: full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Full
       responses:
         '202':
           description: Successful Response
@@ -134,6 +147,12 @@ paths:
           description: Не admin
         '409':
           description: Прогон уже идёт
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /admin/ingest/status:
     get:
       tags:
@@ -383,6 +402,81 @@ paths:
           description: Акт не найден
         '422':
           description: Неизвестная метка доступа
+  /admin/documents:
+    post:
+      tags:
+      - admin
+      summary: Загрузить XML-документы в каталог корпуса (прогон запускается отдельно)
+      description: 'Сохраняет файлы в каталог корпуса (APP_INGEST_CORPUS_DIR). Прогон НЕ
+
+        запускается - после загрузки вызовите POST /admin/ingest (обработаются
+
+        только новые/изменившиеся файлы). Валидация: расширение .xml, лимит
+
+        APP_INGEST_MAX_UPLOAD_MB на файл, имя без traversal.'
+      operationId: upload_documents_admin_documents_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_documents_admin_documents_post'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentsUploadResponse'
+        '403':
+          description: Не admin
+        '409':
+          description: Идёт прогон ingestion
+        '500':
+          description: Каталог корпуса недоступен
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/documents/{filename}:
+    delete:
+      tags:
+      - admin
+      summary: Удалить XML-файл из каталога корпуса (зачистка актов - при следующем ingestion)
+      description: 'Удаляет файл с диска. Акты файла остаются в Qdrant/Neo4j до следующего
+
+        прогона: инкрементальный режим увидит исчезновение файла из каталога и
+
+        зачистит их автоматически (files_removed в статистике прогона).'
+      operationId: delete_document_admin_documents__filename__delete
+      parameters:
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Filename
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDeleteResponse'
+        '403':
+          description: Не admin
+        '404':
+          description: Файл не найден или небезопасное имя
+        '409':
+          description: Идёт прогон ingestion
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/chat:
     post:
       tags:
@@ -536,6 +630,19 @@ components:
       - clearance
       title: ActOut
       description: Метаданные акта из графа знаний.
+    Body_upload_documents_admin_documents_post:
+      properties:
+        files:
+          items:
+            type: string
+            contentMediaType: application/octet-stream
+          type: array
+          title: Files
+          description: XML-файлы корпуса (multipart)
+      type: object
+      required:
+      - files
+      title: Body_upload_documents_admin_documents_post
     ChatRequest:
       properties:
         message:
@@ -591,6 +698,49 @@ components:
       - mode: deactivated
         user_id: '...'
         username: qa_x
+    DocumentDeleteResponse:
+      properties:
+        filename:
+          type: string
+          title: Filename
+        message:
+          type: string
+          title: Message
+          default: Файл удалён из корпуса; акты зачистятся при следующем ingestion
+      type: object
+      required:
+      - filename
+      title: DocumentDeleteResponse
+      description: Итог удаления файла из корпуса (DELETE /admin/documents/{filename}).
+    DocumentsUploadResponse:
+      properties:
+        saved:
+          items:
+            type: string
+          type: array
+          title: Saved
+          description: Имена сохранённых в корпус файлов
+        rejected:
+          items:
+            $ref: '#/components/schemas/UploadRejection'
+          type: array
+          title: Rejected
+        message:
+          type: string
+          title: Message
+          default: Файлы сохранены в каталог корпуса; запустите POST /admin/ingest
+      type: object
+      required:
+      - saved
+      title: DocumentsUploadResponse
+      description: 'Итог загрузки XML в каталог корпуса (POST /admin/documents).
+
+
+        Загрузка ТОЛЬКО сохраняет файлы - прогон запускается отдельно
+
+        (POST /admin/ingest). Прогон считается инкрементально: обработаются
+
+        только новые/изменившиеся файлы.'
     ErrorResponse:
       properties:
         code:
@@ -854,6 +1004,20 @@ components:
         role: analyst
         token_type: bearer
         username: analyst
+    UploadRejection:
+      properties:
+        filename:
+          type: string
+          title: Filename
+        reason:
+          type: string
+          title: Reason
+      type: object
+      required:
+      - filename
+      - reason
+      title: UploadRejection
+      description: Файл, отклонённый при загрузке, с причиной.
     UserCreate:
       properties:
         username:

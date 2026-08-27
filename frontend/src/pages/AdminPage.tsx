@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   ApiError,
   adminCreateUser,
@@ -10,6 +10,7 @@ import {
   ingestStatus,
   startIngest,
   storageStats,
+  uploadDocuments,
 } from '../lib/api'
 import type { components } from '../lib/api-types'
 
@@ -27,7 +28,8 @@ const POLL_INTERVAL_MS = 2000
 
 /** Первый прогон corpus_test (~100 XML / ~2300 чанков) на CPU занимает десятки минут. */
 const RUNNING_HINT =
-  'Эмбеддинги считаются на CPU: полный прогон corpus_test может идти 10–30 минут. ' +
+  'Эмбеддинги считаются на CPU: полный первый прогон может идти 10–30 минут. ' +
+  'Повторные прогоны инкрементальные — обрабатываются только новые/изменившиеся файлы. ' +
   'Прогресс виден в логах backend (docker logs graphrag-backend).'
 
 export default function AdminPage({ onUnauthorized }: AdminPageProps) {
@@ -49,6 +51,11 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
   const [actError, setActError] = useState<string | null>(null)
   const [actNotice, setActNotice] = useState<string | null>(null)
   const [actBusy, setActBusy] = useState(false)
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const refreshStatus = useCallback(async (): Promise<IngestStatusResponse> => {
     const current = await ingestStatus()
@@ -235,20 +242,53 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
     return () => clearInterval(id)
   }, [status?.state])
 
-  const start = async () => {
+  const onFilesPicked = (event: ChangeEvent<HTMLInputElement>) => {
+    setUploadFiles(Array.from(event.target.files ?? []))
+    setUploadNotice(null)
+    setUploadError(null)
+  }
+
+  const upload = async () => {
+    if (uploadFiles.length === 0) return
+    setUploadBusy(true)
+    setUploadNotice(null)
+    setUploadError(null)
+    try {
+      const result = await uploadDocuments(uploadFiles)
+      const parts: string[] = []
+      if (result.saved.length > 0) parts.push(`Сохранено: ${result.saved.join(', ')}`)
+      for (const r of result.rejected ?? []) parts.push(`Отклонён ${r.filename} (${r.reason})`)
+      setUploadNotice(parts.join('. ') + '. Запустите ingestion, чтобы добавить их в поиск.')
+      setUploadFiles([])
+      if (fileInputRef.current !== null) fileInputRef.current.value = ''
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) onUnauthorized()
+        else if (err.status === 409) setUploadError('Идёт прогон ingestion — дождитесь завершения')
+        else setUploadError(err.message)
+      } else {
+        setUploadError('Не удалось загрузить файлы')
+      }
+    } finally {
+      setUploadBusy(false)
+    }
+  }
+
+  const start = async (full = false) => {
     const confirmed = window.confirm(
-      'Пересобрать весь корпус?\n\n' +
-        'XML-файлы будут прочитаны заново из каталога APP_INGEST_CORPUS_DIR\n' +
-        '(в compose: corpus_test/ репозитория → /data/corpus в контейнере backend).\n' +
-        'Каждый акт перезаписывается в Qdrant/Neo4j (без дублей).',
+      full
+        ? 'ПОЛНЫЙ пересчёт корпуса?\n\nВсе XML будут обработаны заново: эмбеддинги пересчитаются для каждого акта (10–30 минут). Нужен после смены чанкера, модели эмбеддингов или процентов грифа.'
+        : 'Запустить ingestion?\n\nИнкрементальный прогон: обработаются только новые и изменившиеся файлы ' +
+          '(снапшот по sha256), остальное — быстрый граф-рефреш. XML-файлы читаются из каталога ' +
+          'APP_INGEST_CORPUS_DIR (в compose: смонтированный CORPUS_HOST_DIR → /data/corpus).',
     )
     if (!confirmed) return
     setBusy(true)
     setNotice(null)
     setError(null)
     try {
-      await startIngest()
-      setNotice('Прогон ingestion запущен. ' + RUNNING_HINT)
+      await startIngest(full)
+      setNotice((full ? 'Полный прогон' : 'Инкрементальный прогон') + ' ingestion запущен. ' + RUNNING_HINT)
       await refreshStatus()
       await refreshStats()
     } catch (err) {
@@ -271,42 +311,61 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
       <div className="card admin-card">
         <h2>Ingestion корпуса</h2>
         <p className="muted">
-          Полная пересборка корпуса правовых актов: XML → чанки → эмбеддинги → Qdrant,
-          граф Act/Authority/Topic → Neo4j. Кнопка доступна только роли admin.
+          Пополнение корпуса правовых актов: XML → чанки → эмбеддинги → Qdrant,
+          граф Act/Authority/Topic → Neo4j. Прогон инкрементальный: обрабатывается
+          только дельта по sha256. Кнопки доступны только роли admin.
         </p>
 
         <div className="info-box">
-          <b>Откуда берутся файлы:</b> backend читает каталог из переменной окружения{' '}
+          <b>Откуда берутся файлы:</b> backend читает каталог{' '}
           <code className="mono">APP_INGEST_CORPUS_DIR</code> — в compose-стеке туда смонтирован
-          каталог <code className="mono">corpus_test/</code> из корня репозитория (путь внутри
-          контейнера: <code className="mono">/data/corpus</code>). Изменить источник можно без
-          правки кода — через env.
+          хост-каталог из переменной <code className="mono">CORPUS_HOST_DIR</code> (внутри
+          контейнера: <code className="mono">/data/corpus</code>). XML можно докладывать тремя
+          способами: положить в папку на хосте, загрузить через форму ниже (POST /admin/documents)
+          или скопировать в контейнер — затем нажать «Запустить ingestion».
         </div>
 
         <details className="admin-details">
           <summary>Как это работает</summary>
           <ol className="admin-steps">
             <li>
-              Парсинг всех <code className="mono">*.xml</code> каталога: метаданные акта, чистка
-              разметки, чанки по статьям.
+              Парсинг всех <code className="mono">*.xml</code> каталога и сравнение sha256 со
+              снапшотом прошлого прогона (таблица <code className="mono">ingest_files</code>).
             </li>
-            <li>Эмбеддинги bge-m3 (CPU) → upsert в коллекцию Qdrant c payload (clearance и пр.).</li>
+            <li>
+              Новые/изменившиеся файлы: чанки по статьям → эмбеддинги bge-m3 (CPU) → upsert в
+              Qdrant с payload (clearance и пр.); удалённые — зачистка актов из Qdrant и Neo4j.
+            </li>
             <li>
               Граф в Neo4j: Act / Authority / Topic + рёбра ISSUED_BY, REFERENCES, HAS_TOPIC;
               LLM-экстракция Concept выключена по умолчанию (
               <code className="mono">APP_INGEST_EXTRACT_CONCEPTS=false</code>, полный цикл — CLI).
             </li>
             <li>
-              Прогон идемпотентен: акт перезаписывается целиком (Qdrant upsert, Neo4j MERGE),
-              повторный запуск не создаёт дублей; во время прогона ответы агента могут быть
-              временно неполными.
+              Неизменённые файлы пропускаются (дешёвый граф-рефреш без эмбеддингов) — повторный
+              прогон занимает секунды. Полный пересчёт — кнопка ниже или{' '}
+              <code className="mono">?full=true</code>/CLI <code className="mono">--full</code>
+              {' '}(после смены чанкера/модели/процентов грифа).
             </li>
           </ol>
         </details>
 
         <div className="admin-controls">
-          <button className="btn btn-primary" disabled={busy || running} onClick={() => void start()}>
+          <button
+            className="btn btn-primary"
+            disabled={busy || running}
+            onClick={() => void start(false)}
+          >
             {busy ? 'Запуск…' : 'Запустить ingestion'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-small"
+            disabled={busy || running}
+            onClick={() => void start(true)}
+            title="Пересчитать все файлы: после смены чанкера, модели эмбеддингов или процентов грифа"
+          >
+            Полный пересчёт
           </button>
           <StateBadge state={status?.state} />
           {running && status?.started_at !== null && status?.started_at !== undefined && (
@@ -315,6 +374,35 @@ export default function AdminPage({ onUnauthorized }: AdminPageProps) {
             </span>
           )}
         </div>
+
+        <h3 className="stats-title">Загрузка файлов в корпус</h3>
+        <p className="muted stats-subtitle">
+          Только XML; файлы сохраняются в каталог корпуса, прогон запускается отдельно кнопкой выше.
+        </p>
+        <div className="admin-controls">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xml,text/xml,application/xml"
+            multiple
+            onChange={onFilesPicked}
+            disabled={uploadBusy || running}
+          />
+          <button
+            type="button"
+            className="btn btn-primary btn-small"
+            disabled={uploadBusy || running || uploadFiles.length === 0}
+            onClick={() => void upload()}
+          >
+            {uploadBusy ? 'Загрузка…' : `Загрузить (${uploadFiles.length})`}
+          </button>
+        </div>
+        {uploadNotice !== null && <div className="info-box">{uploadNotice}</div>}
+        {uploadError !== null && (
+          <div className="error-box" role="alert">
+            {uploadError}
+          </div>
+        )}
 
         {notice !== null && <div className="info-box">{notice}</div>}
         {error !== null && (

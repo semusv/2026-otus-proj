@@ -107,7 +107,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Запустить ingestion корпуса (background task) */
+        /**
+         * Запустить ingestion корпуса (background task; по умолчанию инкрементальный)
+         * @description full=true - форс-полный прогон (пересчёт всех файлов: смена чанкера,
+         *     модели эмбеддингов или процентов грифа). По умолчанию обрабатывается
+         *     только дельта корпуса по sha256 (таблица ingest_files).
+         */
         post: operations["start_ingest_admin_ingest_post"];
         delete?: never;
         options?: never;
@@ -246,6 +251,51 @@ export interface paths {
         patch: operations["change_act_clearance_admin_acts__act_id__clearance_patch"];
         trace?: never;
     };
+    "/admin/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Загрузить XML-документы в каталог корпуса (прогон запускается отдельно)
+         * @description Сохраняет файлы в каталог корпуса (APP_INGEST_CORPUS_DIR). Прогон НЕ
+         *     запускается - после загрузки вызовите POST /admin/ingest (обработаются
+         *     только новые/изменившиеся файлы). Валидация: расширение .xml, лимит
+         *     APP_INGEST_MAX_UPLOAD_MB на файл, имя без traversal.
+         */
+        post: operations["upload_documents_admin_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/documents/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Удалить XML-файл из каталога корпуса (зачистка актов - при следующем ingestion)
+         * @description Удаляет файл с диска. Акты файла остаются в Qdrant/Neo4j до следующего
+         *     прогона: инкрементальный режим увидит исчезновение файла из каталога и
+         *     зачистит их автоматически (files_removed в статистике прогона).
+         */
+        delete: operations["delete_document_admin_documents__filename__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -352,6 +402,14 @@ export interface components {
              */
             clearance: "PUBLIC" | "INTERNAL" | "SECRET";
         };
+        /** Body_upload_documents_admin_documents_post */
+        Body_upload_documents_admin_documents_post: {
+            /**
+             * Files
+             * @description XML-файлы корпуса (multipart)
+             */
+            files: string[];
+        };
         /**
          * ChatRequest
          * @description Запрос к агенту; ``stream=False`` возвращает обычный JSON (Postman/нагрузка).
@@ -399,6 +457,41 @@ export interface components {
              * @enum {string}
              */
             mode: "deactivated" | "deleted";
+        };
+        /**
+         * DocumentDeleteResponse
+         * @description Итог удаления файла из корпуса (DELETE /admin/documents/{filename}).
+         */
+        DocumentDeleteResponse: {
+            /** Filename */
+            filename: string;
+            /**
+             * Message
+             * @default Файл удалён из корпуса; акты зачистятся при следующем ingestion
+             */
+            message: string;
+        };
+        /**
+         * DocumentsUploadResponse
+         * @description Итог загрузки XML в каталог корпуса (POST /admin/documents).
+         *
+         *     Загрузка ТОЛЬКО сохраняет файлы - прогон запускается отдельно
+         *     (POST /admin/ingest). Прогон считается инкрементально: обработаются
+         *     только новые/изменившиеся файлы.
+         */
+        DocumentsUploadResponse: {
+            /**
+             * Saved
+             * @description Имена сохранённых в корпус файлов
+             */
+            saved: string[];
+            /** Rejected */
+            rejected?: components["schemas"]["UploadRejection"][];
+            /**
+             * Message
+             * @default Файлы сохранены в каталог корпуса; запустите POST /admin/ingest
+             */
+            message: string;
         };
         /**
          * ErrorResponse
@@ -572,6 +665,16 @@ export interface components {
             username: string;
             /** Role */
             role: string;
+        };
+        /**
+         * UploadRejection
+         * @description Файл, отклонённый при загрузке, с причиной.
+         */
+        UploadRejection: {
+            /** Filename */
+            filename: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * UserCreate
@@ -835,7 +938,9 @@ export interface operations {
     };
     start_ingest_admin_ingest_post: {
         parameters: {
-            query?: never;
+            query?: {
+                full?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -864,6 +969,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -1198,6 +1312,112 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    upload_documents_admin_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_documents_admin_documents_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentsUploadResponse"];
+                };
+            };
+            /** @description Не admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Идёт прогон ingestion */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Каталог корпуса недоступен */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_document_admin_documents__filename__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentDeleteResponse"];
+                };
+            };
+            /** @description Не admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Файл не найден или небезопасное имя */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Идёт прогон ingestion */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
