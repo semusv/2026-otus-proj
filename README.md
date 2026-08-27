@@ -23,3 +23,21 @@ make k8s-down        # остановить port-forward (+ -StopCluster для 
 Наблюдаемость — самостоятельный проект на хосте (переиспользуемый обоими режимами):
 `docker compose -f infra/docker-compose.observability.yml up -d`
 → Jaeger :16686, Prometheus :9090, Grafana :3000.
+
+## Работа с корпусом (пополнение документов)
+
+Ingestion **инкрементальный**: прогон обрабатывает только новые/изменившиеся файлы
+(снапшот по sha256 в PG), неизменённые пропускает — повторный запуск занимает секунды,
+первый полный прогон корпуса 10–30 мин. Любой способ пополнения заканчивается
+кнопкой «Запустить ingestion» в Admin UI (или `POST /admin/ingest`):
+
+| Способ | Где работает | Как |
+|---|---|---|
+| Папка на хосте | compose | скопировать XML в `CORPUS_HOST_DIR` (по умолчанию `corpus_test/`) — маунт живой |
+| Upload через UI/API | compose + minikube | Admin → «Загрузка файлов» (`POST /admin/documents`, admin, только `.xml`); удаление — `DELETE /admin/documents/{filename}` |
+| kubectl cp | minikube | `kubectl cp act.xml graphrag/backend-<pod>:/data/corpus/` |
+
+Полный пересчёт всего корпуса (после смены чанкера/модели эмбеддингов/процентов
+грифа) — кнопка «Полный пересчёт» или `POST /admin/ingest?full=true` / CLI `--full`.
+Подробнее: `backend/README.md` (правила), `infra/README.md` (compose),
+`docs/minikube-deployment.md` (кластер).

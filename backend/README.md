@@ -44,9 +44,10 @@ backend/
 │   │   ├── embeddings.py     # bge-m3 lazy-load CPU (sentence-transformers)
 │   │   ├── concepts.py       # LLM-экстракция (:Concept), устойчива к сбоям LLM
 │   │   ├── qdrant_writer.py  # коллекция chunks, UUIDv5-идемпотентность, payload-index clearance
-│   │   ├── neo4j_writer.py   # MERGE-батчи Act/Authority/Topic/Concept + constraints
-│   │   ├── pipeline.py       # оркестратор прогона (run_ingestion)
-│   │   └── __main__.py       # CLI: python -m app.ingestion [--dir] [--concepts|--no-concepts]
+│   │   ├── neo4j_writer.py   # MERGE-батчи Act/Authority/Topic/Concept + constraints (+delete_act)
+│   │   ├── incremental.py    # план дельты корпуса по sha256 (plan_incremental, FileSnapshot)
+│   │   ├── pipeline.py       # оркестратор прогона (run_ingestion): инкрементальный по умолчанию
+│   │   └── __main__.py       # CLI: python -m app.ingestion [--dir] [--full] [--concepts|--no-concepts]
 │   └── schemas/
 │       ├── auth.py           # LoginRequest, TokenResponse, MeResponse
 │       ├── admin.py          # IngestStartResponse, IngestStatusResponse
@@ -94,7 +95,7 @@ backend/
 Логины (успех/неудачa) пишутся в `audit_log` c `request_id`/`trace_id`.
 Демо-пользователи: `viewer/analyst/admin` (пароли по умолчанию — только dev).
 
-### Ingestion (этап 4)
+### Ingestion (этап 4, инкрементальный режим — задача «Корпус»)
 
 Конвейер: XML RusLawOD → парсер → cleaner → чанкер («Статья N.», атомарно) →
 bge-m3 (CPU) → Qdrant (`chunks`, payload: act_id/title/chunk_no/clearance/text) →
@@ -102,12 +103,33 @@ bge-m3 (CPU) → Qdrant (`chunks`, payload: act_id/title/chunk_no/clearance/text
 LLM-экстракция MENTIONS→Concept, флаг `APP_INGEST_EXTRACT_CONCEPTS`).
 
 Ключевые свойства:
+- **Инкрементальность**: каждый файл хешируется sha256 и сравнивается со снапшотом
+  прошлого прогона (таблица PG `ingest_files`). Обрабатываются только новые и
+  изменившиеся файлы; неизменённые — дешёвый граф-рефреш без эмбеддингов/LLM
+  (акты получают REFERENCES на только что добавленные); исчезнувшие из каталога
+  файлы — зачистка их актов из Qdrant и Neo4j. Повторный прогон без изменений
+  занимает секунды;
 - **Идемпотентность**: точки Qdrant — UUIDv5(act_id, chunk_no) + delete перед upsert;
   в Neo4j всё через MERGE; повторный прогон не создаёт дублей;
 - **Clearance детерминирован**: md5-хэш от act_id раскладывает акты по
-  PUBLIC/INTERNAL/SECRET с процентами из конфига — воспроизводимо между прогонами;
-- **Сбои не останавливают прогон**: битый XML → в `parse_errors`, недоступный LLM →
-  акт без Concepts.
+  PUBLIC/INTERNAL/SECRET с процентами из конфига — воспроизводимо между прогонами.
+  ВНИМАНИЕ: после смены процентов/чанкера/модели эмбеддингов нужен полный прогон
+  (`POST /admin/ingest?full=true` или CLI `--full`), иначе payload/чанки устареют;
+- **Сбои не останавливают прогон**: битый XML → в `parse_errors` (в снапшот не
+  попадает и ретраится следующим прогоном), недоступный LLM → акт без Concepts.
+
+### Работа с корпусом (как пополнить)
+
+Все способы заканчиваются нажатием «Запустить ingestion» (кнопка в Admin UI или
+`POST /admin/ingest`) — прогон подхватит ровно дельту:
+
+1. **Папка на хосте** (compose): докинуть XML в каталог `CORPUS_HOST_DIR`
+   (по умолчанию `corpus_test/` репозитория) — маунт живой, без пересборки/перезапуска;
+2. **Через API/UI**: `POST /admin/documents` (multipart, admin) — только `.xml`,
+   лимит `APP_INGEST_MAX_UPLOAD_MB` на файл, имя без traversal. Загрузка ТОЛЬКО
+   сохраняет файлы в каталог корпуса; `DELETE /admin/documents/{filename}` удаляет
+   (акты зачистятся при следующем прогоне);
+3. **CLI**: `python -m app.ingestion --dir <каталог>` — если корпус в другом месте.
 
 Запуск:
 
@@ -118,8 +140,10 @@ $env:APP_LLM_MODEL    = "qwen3.5-2b"                  # НЕ-thinking модел
 uv --directory backend run python -m app.ingestion --concepts
 
 # или через API (роль admin; корпус смонтирован в контейнер)
-POST http://api.localhost/admin/ingest          # 202 старт / 409 уже идёт
-GET  http://api.localhost/admin/ingest/status   # idle|running|done|error + stats
+POST http://api.localhost/admin/documents       # multipart: загрузить XML (без автозапуска)
+POST http://api.localhost/admin/ingest          # 202 старт инкрементального прогона / 409
+POST http://api.localhost/admin/ingest?full=true# форс-полный пересчёт
+GET  http://api.localhost/admin/ingest/status   # idle|running|done|error + stats (в т.ч. files_skipped/added/changed/removed)
 ```
 
 > Важно: «думающие» модели (qwen3.5-9b и т.п.) тратят весь бюджет токенов на
@@ -146,6 +170,7 @@ GET  http://api.localhost/admin/ingest/status   # idle|running|done|error + stat
 | `APP_INGEST_EXTRACT_CONCEPTS` | `false` | LLM-экстракция Concepts |
 | `APP_INGEST_INTERNAL_PERCENT` / `SECRET_PERCENT` | 20 / 10 | разметка clearance (остаток PUBLIC) |
 | `APP_INGEST_CONCEPT_MAX_PER_CHUNK` | 6 | лимит понятий с чанка |
+| `APP_INGEST_MAX_UPLOAD_MB` | 20 | лимит размера файла при `POST /admin/documents` |
 
 Источник значений: env процесса > `infra/.env` (для локальных скриптов) > дефолт.
 Шаблон — `infra/.env.example`.
@@ -159,8 +184,8 @@ compose) · `gpu_slow` (LLM-as-a-Judge, этап 5+).
 |---|---|
 | `make lint` | ruff check + mypy — **gate всех коммитов** |
 | `make fmt` | ruff format + autofix |
-| `make test-unit` | 88 тестов: конфиг, корреляция, логи, JWT, парсер/чанкер/clearance/онтология, LLM-моки |
-| `make test-integration` | против compose: auth-флоу в изолируемой PG, admin API, ingestion (Qdrant+Neo4j, идемпотентность) |
+| `make test-unit` | 122 теста: конфиг, корреляция, логи, JWT, парсер/чанкер/clearance/онтология, LLM-моки, инкрементальный план корпуса |
+| `make test-integration` | против compose: auth-флоу в изолируемой PG, admin API, ingestion (Qdrant+Neo4j, идемпотентность), инкрементальные прогоны (add/change/remove), upload/delete документов |
 | `make test-all` | unit + integration |
 | `make seed-users` | (пере)создать viewer/analyst/admin в основной БД `graphrag` |
 | `make openapi-export` | перегенерировать `docs/api/openapi.yaml` после правок эндпоинтов |

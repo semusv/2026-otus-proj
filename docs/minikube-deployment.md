@@ -128,6 +128,36 @@ curl.exe -s -X POST http://127.0.0.1:8080/admin/ingest -H "Authorization: Bearer
 powershell scripts/run_postman.ps1 -BaseUrl http://127.0.0.1:8080
 ```
 
+### 4.1. Корпус: как пополнять в кластере (задача «Корпус»)
+
+Корпус живёт на PVC `corpus-pvc`, смонтированном в backend `/data/corpus` (rw).
+Прогон инкрементальный (дельта по sha256) — после пополнения достаточно
+`POST /admin/ingest`, пересчёта всего корпуса не будет. Способы:
+
+```powershell
+# 1) Upload через UI/Admin (проще всего): http://localhost:8080 -> Admin ->
+#    «Загрузка файлов» -> выбрать XML -> «Загрузить» -> «Запустить ingestion».
+#    Тот же путь через API (admin-токен):
+curl.exe -s -X POST http://127.0.0.1:8080/admin/documents `
+  -H "Authorization: Bearer $tok" -F "files=@act.xml;type=text/xml"
+#    Удаление файла из корпуса (акты зачистятся при следующем ingestion):
+curl.exe -s -X DELETE http://127.0.0.1:8080/admin/documents/act.xml -H "Authorization: Bearer $tok"
+
+# 2) kubectl cp напрямую на PVC (обходит API; имена файлов не валидируются):
+kubectl -n graphrag cp ./act.xml backend-<pod>:/data/corpus/act.xml
+
+# 3) Пересборка corpus-init Job (массовая заливка нового корпуса «с нуля»):
+#    положить XML в infra/corpus-loader/, собрать образ С НОВЫМ ТЕГОМ, запушить
+#    в Docker Hub, обновить image.corpusLoader в values.yaml, helm upgrade,
+#    удалить Job (kubectl -n graphrag delete job corpus-init) - пересоздастся.
+#    ВНИМАНИЕ: init-Job делает `cp /corpus/* /data/corpus/` - поверх, без
+#    удаления старых файлов; для чистого корпуса сначала очистить PVC.
+```
+
+Маунт rw - обязательно для способа 1 (upload пишет файлы в PVC из пода backend).
+После смены процентов грифа/чанкера/модели - полный прогон
+`POST /admin/ingest?full=true` (кнопка «Полный пересчёт» в UI).
+
 ## 5. Повседневный запуск
 
 Скрипты (см. `scripts/`):

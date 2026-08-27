@@ -100,6 +100,32 @@ docker compose -f infra/docker-compose.yml up -d --build backend
 Имена volume'ов стабильны (`graphrag_pg_data`, `graphrag_qdrant_data`,
 `graphrag_neo4j_data`, …) — данные переживают `down` и перезапуски.
 
+## Корпус: как пополнять (задача «Корпус»)
+
+Каталог корпуса монтируется в backend как живой bind mount — новые XML подхватываются
+без пересборки образов и перезапуска:
+
+```yaml
+# docker-compose.yml, сервис backend
+- ${CORPUS_HOST_DIR:-../corpus_test}:/data/corpus:rw
+```
+
+Способы пополнения (любой → затем «Запустить ingestion» в Admin UI или
+`POST /admin/ingest`; прогон инкрементальный — обработается только дельта по sha256):
+
+1. **Папка на хосте**: скопировать XML в `CORPUS_HOST_DIR` (по умолчанию
+   `corpus_test/` в корне репозитория). Свой каталог — одна строка в `infra/.env`:
+   `CORPUS_HOST_DIR=D:/data/my_corpus` (абсолютный путь тоже работает);
+2. **Через API/UI** (`POST /admin/documents`, admin-only, multipart): только `.xml`,
+   лимит `APP_INGEST_MAX_UPLOAD_MB` на файл; загрузка только сохраняет файлы —
+   прогон запускается отдельно. `DELETE /admin/documents/{filename}` — удалить файл;
+3. **`docker cp`**: `docker cp act.xml graphrag-backend:/data/corpus/` — если папка
+   хоста недоступна.
+
+Маунт rw нужен именно для способа 2. Менять путь корпуса — только через
+`CORPUS_HOST_DIR` (код не трогается). После смены процентов грифа
+(`APP_INGEST_*_PERCENT`) — полный прогон `POST /admin/ingest?full=true`.
+
 ## Подъём руками, по шагам (если что-то пошло не так)
 
 1. Убедиться, что Docker Desktop запущен и движок живой: `docker info`.
