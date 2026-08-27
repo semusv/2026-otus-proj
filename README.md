@@ -21,6 +21,7 @@
 | LangGraph state machine (Memory / Planner / Tools) | ADR-005, `backend/app/agents/graph.py` |
 | RBAC: User B не получает секретный документ | ADR-007, этап 6 PLAN.md, Postman-папка `40-chat-rbac` |
 | Streaming (SSE) | `POST /api/chat`, SSE-события в `docs/api/openapi.yaml` |
+| Цикл запроса в чате: конвейер агента, панели Grafana, разбор трейсов Jaeger | [docs/query-flow-deep-dive.md](docs/query-flow-deep-dive.md) |
 | LLM-as-a-Judge тесты промптов | `make test-judge` (маркер `gpu_slow`) |
 | Нагрузочный отчёт (RPS, латентность, tok/s) | [docs/load-report.md](docs/load-report.md) |
 | Видео-демо 5–7 мин «под капотом» | [docs/video-demo-script.md](docs/video-demo-script.md) |
