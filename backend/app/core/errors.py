@@ -74,6 +74,18 @@ class ActNotFoundError(AppError):
     message = "Акт не найден"
 
 
+class CorpusUnavailableError(AppError):
+    code = "corpus_unavailable"
+    status_code = 500
+    message = "Каталог корпуса недоступен"
+
+
+class DocumentNotFoundError(AppError):
+    code = "document_not_found"
+    status_code = 404
+    message = "Файл не найден в каталоге корпуса"
+
+
 def _error_body(
     code: str,
     message: str,

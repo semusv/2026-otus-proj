@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     ingest_internal_percent: int = Field(default=20, ge=0, le=100)
     ingest_secret_percent: int = Field(default=10, ge=0, le=100)
     ingest_concept_max_per_chunk: int = Field(default=6, ge=1, le=20)
+    ingest_max_upload_mb: int = Field(default=20, ge=1, le=500)
 
     # --- Метаданные API ---
     api_title: str = "GraphRAG Platform API"

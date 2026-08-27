@@ -8,6 +8,7 @@ dependencies = [
     "alembic>=1.14",
     "bcrypt>=4.2",
     "fastapi>=0.115",
+    "python-multipart>=0.0.20",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "PyJWT>=2.10",
@@ -77,6 +78,7 @@ ignore = [
 "scripts/**" = ["S104"]
 "migrations/**" = ["E501"]
 "tests/integration/test_ingestion.py" = ["E501"]  # инлайн XML-фикстуры корпуса
+"tests/integration/test_ingestion_incremental.py" = ["E501"]  # инлайн XML-фикстуры корпуса
 
 [tool.mypy]
 python_version = "3.12"

@@ -11,7 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from qdrant_client import AsyncQdrantClient
 from qdrant_client import models as qmodels
 from sqlalchemy import func, select
@@ -22,6 +22,8 @@ from app.api.deps import audit_context, get_current_user
 from app.config import Settings
 from app.core.errors import (
     ActNotFoundError,
+    CorpusUnavailableError,
+    DocumentNotFoundError,
     ForbiddenError,
     IngestAlreadyRunningError,
     LastAdminError,
@@ -39,12 +41,15 @@ from app.ingestion.pipeline import IngestProgress, run_ingestion
 from app.schemas.acts import ActClearanceUpdate, ActOut
 from app.schemas.admin import (
     DeleteUserResponse,
+    DocumentDeleteResponse,
+    DocumentsUploadResponse,
     IngestStartResponse,
     IngestStatusResponse,
     Neo4jStats,
     PostgresStats,
     QdrantStats,
     StorageStatsResponse,
+    UploadRejection,
     UserCreate,
     UserOut,
     UserRoleUpdate,
@@ -72,12 +77,17 @@ def _state(app_state: object) -> dict[str, object]:
     "/ingest",
     response_model=IngestStartResponse,
     status_code=202,
-    summary="Запустить ingestion корпуса (background task)",
+    summary="Запустить ingestion корпуса (background task; по умолчанию инкрементальный)",
     responses={403: {"description": "Не admin"}, 409: {"description": "Прогон уже идёт"}},
 )
 async def start_ingest(
-    request: Request, user: User = Depends(get_current_user)
+    request: Request,
+    user: User = Depends(get_current_user),
+    full: bool = False,
 ) -> IngestStartResponse:
+    """full=true - форс-полный прогон (пересчёт всех файлов: смена чанкера,
+    модели эмбеддингов или процентов грифа). По умолчанию обрабатывается
+    только дельта корпуса по sha256 (таблица ingest_files)."""
     _require_admin(user)
     state = _state(request.app.state)
     if state["state"] == "running":
@@ -109,10 +119,12 @@ async def start_ingest(
     async def _job() -> None:
         try:
             stats = await run_ingestion(
-                settings, corpus_dir,
+                settings,
+                corpus_dir,
                 progress=progress,
                 run_id=run_id,
                 session_factory=db.session_factory,
+                full=full,
             )
             async with db.session_factory() as session:
                 from sqlalchemy import update as sa_update
@@ -535,3 +547,123 @@ async def change_act_clearance(
         status=row.get("status") or None,
         clearance=payload.clearance,
     )
+
+
+def _safe_upload_name(raw: str | None) -> str:
+    """Basename без traversal; пустое/опасное/слишком длинное имя -> ''. """
+    if not raw:
+        return ""
+    safe = Path(raw).name
+    # backslash проверяем явно: на Linux он часть имени (не сепаратор у Path)
+    if safe in ("", ".", "..") or safe != raw or "\\" in safe or len(safe) > 255:
+        return ""
+    return safe
+
+
+@router.post(
+    "/documents",
+    response_model=DocumentsUploadResponse,
+    status_code=201,
+    summary="Загрузить XML-документы в каталог корпуса (прогон запускается отдельно)",
+    responses={
+        403: {"description": "Не admin"},
+        409: {"description": "Идёт прогон ingestion"},
+        500: {"description": "Каталог корпуса недоступен"},
+    },
+)
+async def upload_documents(
+    request: Request,
+    files: list[UploadFile] = File(..., description="XML-файлы корпуса (multipart)"),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> DocumentsUploadResponse:
+    """Сохраняет файлы в каталог корпуса (APP_INGEST_CORPUS_DIR). Прогон НЕ
+    запускается - после загрузки вызовите POST /admin/ingest (обработаются
+    только новые/изменившиеся файлы). Валидация: расширение .xml, лимит
+    APP_INGEST_MAX_UPLOAD_MB на файл, имя без traversal."""
+    _require_admin(user)
+    state = _state(request.app.state)
+    if state["state"] == "running":
+        raise IngestAlreadyRunningError()
+
+    settings: Settings = request.app.state.settings
+    corpus_dir = Path(settings.ingest_corpus_dir)
+    if not corpus_dir.is_dir():  # noqa: ASYNC240 - локальный каталог корпуса
+        raise CorpusUnavailableError(f"Каталог корпуса недоступен: {corpus_dir}")
+
+    max_bytes = settings.ingest_max_upload_mb * 1024 * 1024
+    saved: list[str] = []
+    rejected: list[UploadRejection] = []
+    for f in files:
+        name = _safe_upload_name(f.filename)
+        if not name:
+            rejected.append(UploadRejection(filename=f.filename or "", reason="invalid_filename"))
+            continue
+        if not name.casefold().endswith(".xml"):
+            rejected.append(UploadRejection(filename=name, reason="not_xml"))
+            continue
+        data = await f.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            rejected.append(UploadRejection(filename=name, reason="too_large"))
+            continue
+        target = corpus_dir / name
+        await asyncio.to_thread(target.write_bytes, data)
+        if name not in saved:
+            saved.append(name)
+
+    session.add(
+        AuditLog(
+            action="admin.documents_uploaded",
+            user_id=user.id,
+            detail={
+                "saved": saved,
+                "rejected": [r.model_dump() for r in rejected],
+            },
+            **audit_context(),
+        )
+    )
+    await session.commit()
+    return DocumentsUploadResponse(saved=saved, rejected=rejected)
+
+
+@router.delete(
+    "/documents/{filename}",
+    response_model=DocumentDeleteResponse,
+    summary="Удалить XML-файл из каталога корпуса (зачистка актов - при следующем ingestion)",
+    responses={
+        403: {"description": "Не admin"},
+        404: {"description": "Файл не найден или небезопасное имя"},
+        409: {"description": "Идёт прогон ingestion"},
+    },
+)
+async def delete_document(
+    filename: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> DocumentDeleteResponse:
+    """Удаляет файл с диска. Акты файла остаются в Qdrant/Neo4j до следующего
+    прогона: инкрементальный режим увидит исчезновение файла из каталога и
+    зачистит их автоматически (files_removed в статистике прогона)."""
+    _require_admin(user)
+    state = _state(request.app.state)
+    if state["state"] == "running":
+        raise IngestAlreadyRunningError()
+
+    safe = _safe_upload_name(filename)
+    settings: Settings = request.app.state.settings
+    target = Path(settings.ingest_corpus_dir) / safe if safe else None
+    if target is None or not target.is_file():
+        raise DocumentNotFoundError()
+
+    await asyncio.to_thread(target.unlink)
+    session.add(
+        AuditLog(
+            action="admin.document_deleted",
+            user_id=user.id,
+            detail={"filename": safe},
+            **audit_context(),
+        )
+    )
+    await session.commit()
+    return DocumentDeleteResponse(filename=safe)

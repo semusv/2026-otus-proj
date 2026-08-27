@@ -25,6 +25,33 @@ class IngestStatusResponse(BaseModel):
     chunks_done: int | None = None
 
 
+class UploadRejection(BaseModel):
+    """Файл, отклонённый при загрузке, с причиной."""
+
+    filename: str
+    reason: str
+
+
+class DocumentsUploadResponse(BaseModel):
+    """Итог загрузки XML в каталог корпуса (POST /admin/documents).
+
+    Загрузка ТОЛЬКО сохраняет файлы - прогон запускается отдельно
+    (POST /admin/ingest). Прогон считается инкрементально: обработаются
+    только новые/изменившиеся файлы.
+    """
+
+    saved: list[str] = Field(description="Имена сохранённых в корпус файлов")
+    rejected: list[UploadRejection] = Field(default_factory=list)
+    message: str = "Файлы сохранены в каталог корпуса; запустите POST /admin/ingest"
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Итог удаления файла из корпуса (DELETE /admin/documents/{filename})."""
+
+    filename: str
+    message: str = "Файл удалён из корпуса; акты зачистятся при следующем ingestion"
+
+
 class QdrantStats(BaseModel):
     """Наполнение векторного хранилища."""
 
