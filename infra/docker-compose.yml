@@ -26,7 +26,7 @@ services:
       context: ../backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    image: graphrag/backend:stage8
+    image: graphrag/backend:stage10.4
     container_name: graphrag-backend
     restart: unless-stopped
     environment:
@@ -93,7 +93,7 @@ services:
   frontend:
     build:
       context: ../frontend
-    image: graphrag/frontend:stage8
+    image: graphrag/frontend:stage10.3
     container_name: graphrag-frontend
     restart: unless-stopped
     depends_on:

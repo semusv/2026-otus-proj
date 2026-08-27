@@ -10,6 +10,7 @@
   python scripts/smoke_infra.py                 # базовый стек
   python scripts/smoke_infra.py --with-obs      # + jaeger/prometheus/grafana/otel
   python scripts/smoke_infra.py --with-gpu      # + vllm
+  python scripts/smoke_infra.py --with-langfuse # + langfuse (отдельный проект)
 Exit code: 0 - всё зелёное, 1 - есть FAIL.
 """
 
@@ -27,8 +28,18 @@ COMPOSE_DIR = REPO_ROOT / "infra"
 BASE_SERVICES = ["traefik", "backend", "postgres", "qdrant", "neo4j", "vault"]
 OBS_SERVICES = ["otel-collector", "jaeger", "prometheus", "grafana"]
 GPU_SERVICES = ["vllm"]
+LANGFUSE_SERVICES = [
+    "langfuse-web",
+    "langfuse-worker",
+    "langfuse-postgres",
+    "langfuse-redis",
+    "langfuse-clickhouse",
+    "langfuse-minio",
+]
+# Одноразовая джоба не проверяется на running
+LANGFUSE_INIT_SERVICE = "langfuse-bucket-init"
 
-SERVICES_WITHOUT_HCHECK = {"jaeger", "grafana", "otel-collector"}
+SERVICES_WITHOUT_HCHECK = {"jaeger", "grafana", "otel-collector", "langfuse-web", "langfuse-worker"}
 
 DIRECT_HTTP_CHECKS = [
     ("backend", "/health"),
@@ -49,15 +60,10 @@ OBS_HTTP_CHECKS = [
     ("grafana", "APP_GRAFANA_PORT", "3000", "/api/health"),
 ]
 
-
-def compose_cmd(args: argparse.Namespace) -> list[str]:
-    cmd = ["docker", "compose", "--project-directory", str(COMPOSE_DIR),
-           "-f", str(COMPOSE_DIR / "docker-compose.yml")]
-    if args.with_obs:
-        cmd += ["-f", str(COMPOSE_DIR / "docker-compose.observability.yml")]
-    if args.with_gpu:
-        cmd += ["-f", str(COMPOSE_DIR / "docker-compose.gpu.yml")]
-    return cmd
+# Langfuse - самостоятельный проект (graphrag-langfuse): прямой порт 3300,
+# а также через Traefik если он запущен
+LANGFUSE_DIRECT_CHECK = ("langfuse-web", "APP_LANGFUSE_PORT", "3300", "/api/public/health")
+LANGFUSE_TRAEFIK_CHECK = ("langfuse.localhost", "/api/public/health", "langfuse-web")
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -73,31 +79,71 @@ def load_env(path: Path) -> dict[str, str]:
     return env
 
 
-def get_compose_ps(cmd_prefix: list[str]) -> dict[str, dict]:
-    result = subprocess.run(
-        cmd_prefix + ["ps", "--format", "json"],
-        capture_output=True, text=True, encoding="utf-8",
-    )
-    if result.returncode != 0:
-        print(f"FAIL: docker compose ps error:\n{result.stderr}")
-        sys.exit(1)
-    services = {}
-    out = result.stdout.strip()
-    if not out:
-        return services
-    try:
-        data = json.loads(out)
-        items = data if isinstance(data, list) else [data]
-    except json.JSONDecodeError:
-        items = [json.loads(line) for line in out.splitlines() if line.strip()]
-    for item in items:
-        name = item.get("Service") or item.get("Name") or ""
-        services[name] = item
-    return services
+def get_all_containers(args: argparse.Namespace) -> dict[str, dict]:
+    """Собирает состояние контейнеров из всех нужных compose-проектов."""
+    projects = []
+
+    # Основной проект graphrag
+    main_files = [str(COMPOSE_DIR / "docker-compose.yml")]
+    if args.with_obs:
+        main_files.append(str(COMPOSE_DIR / "docker-compose.observability.yml"))
+    if args.with_gpu:
+        main_files.append(str(COMPOSE_DIR / "docker-compose.gpu.yml"))
+    if args.with_langfuse:
+        main_files.append(str(COMPOSE_DIR / "docker-compose.langfuse.yml"))
+    projects.append(("graphrag", main_files))
+
+    # Отдельный проект observability (если включён)
+    if args.with_obs:
+        obs_files = [str(COMPOSE_DIR / "docker-compose.observability.yml")]
+        projects.append(("graphrag-observability", obs_files))
+
+    # Отдельный проект langfuse (если включён)
+    if args.with_langfuse:
+        lf_files = [str(COMPOSE_DIR / "docker-compose.langfuse.yml")]
+        projects.append(("graphrag-langfuse", lf_files))
+
+    all_services = {}
+    for project, files in projects:
+        cmd = ["docker", "compose", "-p", project, "--project-directory", str(COMPOSE_DIR)]
+        for f in files:
+            cmd += ["-f", f]
+        cmd += ["ps", "--format", "json"]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        if result.returncode != 0:
+            print(f"WARN: не удалось получить ps для проекта {project}: {result.stderr}")
+            continue
+
+        out = result.stdout.strip()
+        if not out:
+            continue
+
+        try:
+            data = json.loads(out)
+            items = data if isinstance(data, list) else [data]
+        except json.JSONDecodeError:
+            # Если вывод представляет собой несколько JSON-объектов по одному на строку
+            items = []
+            for line in out.splitlines():
+                if line.strip():
+                    try:
+                        items.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+
+        for item in items:
+            name = item.get("Service") or item.get("Name") or ""
+            if name:
+                all_services[name] = item
+
+    return all_services
 
 
-def check_containers(expected: list[str], running: dict[str, dict]) -> tuple[list, int]:
+def check_containers(expected: list[str], running: dict[str, dict],
+                     init_containers: list[str] | None = None) -> tuple[list, int]:
     rows, fails = [], 0
+    init_containers = init_containers or []
     for svc in expected:
         info = running.get(svc)
         if info is None:
@@ -115,7 +161,22 @@ def check_containers(expected: list[str], running: dict[str, dict]) -> tuple[lis
         if not ok:
             fails += 1
         rows.append((svc, "container", "OK" if ok else "FAIL", status))
-    extra = set(running) - set(expected)
+
+    # Одноразовые джобы: проверяем, что они завершились успешно
+    for svc in init_containers:
+        info = running.get(svc)
+        if info is None:
+            rows.append((svc, "container", "FAIL", "контейнер не запущен"))
+            fails += 1
+            continue
+        state = (info.get("State") or "").lower()
+        exit_code = info.get("ExitCode", -1)
+        ok = state == "exited" and exit_code == 0
+        rows.append((svc, "container", "OK" if ok else "FAIL", f"{state} exit={exit_code}"))
+        if not ok:
+            fails += 1
+
+    extra = set(running) - set(expected) - set(init_containers)
     if extra:
         rows.append((",".join(sorted(extra)), "container", "WARN",
                      "запущены, но не входят в выбранный набор"))
@@ -154,28 +215,28 @@ def main() -> None:
                         help="ждать также otel/jaeger/prometheus/grafana")
     parser.add_argument("--with-gpu", action="store_true",
                         help="ждать также vllm")
+    parser.add_argument("--with-langfuse", action="store_true",
+                        help="ждать также langfuse (отдельный проект)")
     args = parser.parse_args()
 
     expected = list(BASE_SERVICES)
+    init_containers = []
     if args.with_obs:
         expected += OBS_SERVICES
     if args.with_gpu:
         expected += GPU_SERVICES
+    if args.with_langfuse:
+        expected += LANGFUSE_SERVICES
+        init_containers.append(LANGFUSE_INIT_SERVICE)
 
-    prefix = compose_cmd(args)
-    running = get_compose_ps(prefix)
-    if args.with_obs:
-        # наблюдаемость живёт отдельным проектом - ps по его файлу
-        obs_prefix = ["docker", "compose", "-f",
-                      str(COMPOSE_DIR / "docker-compose.observability.yml")]
-        running.update(get_compose_ps(obs_prefix))
+    running = get_all_containers(args)
 
-    rows, fails = check_containers(expected, running)
+    rows, fails = check_containers(expected, running, init_containers)
 
-    traefik_port = load_env(COMPOSE_DIR / ".env").get("APP_TRAEFIK_HTTP_PORT", "80")
+    env = load_env(COMPOSE_DIR / ".env")
+    traefik_port = env.get("APP_TRAEFIK_HTTP_PORT", "80")
 
     # прямые проверки берём порты по умолчанию из .env
-    env = load_env(COMPOSE_DIR / ".env")
     direct_ports = {
         "backend": int(env.get("APP_BACKEND_PORT", "8000")),
         "qdrant": int(env.get("APP_QDRANT_HTTP_PORT", "6333")),
@@ -198,6 +259,22 @@ def main() -> None:
         fails += check_http(rows, "obs-direct", int(env.get(port_env, port_default)),
                             path, label=f"{svc}:{path}")
 
+    # Langfuse: прямой порт + через Traefik (если Traefik запущен)
+    if args.with_langfuse:
+        svc, port_env, port_default, path = LANGFUSE_DIRECT_CHECK
+        port = int(env.get(port_env, port_default))
+        fails += check_http(rows, "langfuse-direct", port, path, label="langfuse:3300")
+
+        # Через Traefik проверяем только если traefik есть в expected
+        if "traefik" in expected:
+            host, path, svc = LANGFUSE_TRAEFIK_CHECK
+            fails += check_http(rows, "langfuse-traefik", int(traefik_port), path,
+                                host_header=host, label=host)
+        else:
+            rows.append(("langfuse.localhost", "langfuse-traefik", "SKIP", "Traefik не запущен"))
+
+    # Внешний Langfuse (если задан LANGFUSE_URL в .env) – проверка на случай,
+    # если используется внешний инстанс, а не локальный compose-проект.
     langfuse_url = env.get("LANGFUSE_URL", "")
     if langfuse_url:
         ok, detail = http_check(langfuse_url.rstrip("/") + "/api/public/health")
@@ -210,8 +287,7 @@ def main() -> None:
     llm_base = env.get("APP_LLM_BASE_URL", "")
     if llm_base:
         url = llm_base.replace("host.docker.internal", "127.0.0.1").rstrip("/")
-        ok, detail = http_check(url + "/models",
-                                host_header=None)
+        ok, detail = http_check(url + "/models", host_header=None)
         rows.append((f"llm {env.get('APP_LLM_MODEL', '?')}", "external",
                      "OK" if ok else "FAIL", detail))
         if not ok:
