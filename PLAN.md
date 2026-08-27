@@ -858,6 +858,62 @@ Newman gate против кластера **36 запросов / 55 assertions 
 - Первый newman-прогон поймал плавающий дегрейд LM Studio на одном чате (41.6с, пустой ответ)
   - перепрогон зелёный; соответствует уроку этапа 9 о ретраях/повторах gate.
 
+### [ ] Корпус: инкрементальный ingestion + загрузка файлов (backlog п.1–3)
+
+> Задача закрытия бэклога п.1–3: корпус растёт (сейчас corpus_test 100 файлов) — полный
+> перегон на каждый прогон становится узким местом. Инкрементальный режим (skip по sha256),
+> конфигурируемый каталог (`CORPUS_HOST_DIR`) и загрузка файлов через API/UI
+> («положил файл → нажал Ingest»). Автозапуска прогона после загрузки НЕТ — явно, кнопкой.
+
+**Deliverables:** миграция `ingest_files`, инкрементальная логика pipeline, `POST /admin/documents`, upload UI, обновление README (backend/infra/root) + docs/minikube-deployment.md.
+
+Решения (зафиксировано при планировании):
+- Парсим ВСЕ XML каждый прогон (дёшево, секунды) — полный `corpus_ids` для корректного
+  фильтра REFERENCES; дорогая часть (эмбеддинги/LLM-concepts) — только для дельты;
+- unchanged-файлы: дешёвый ре-MERGE детерминированной части графа (старые акты получают
+  REFERENCES на новые), БЕЗ эмбеддингов и LLM; changed/new — полный путь; removed —
+  зачистка актов (Qdrant delete_act + Neo4j DETACH DELETE + чистка осиротевших Concept/Topic);
+- снапшот корпуса — таблица PG `ingest_files` (filename, sha256, ingested_at, act_ids,
+  chunks_count); форс-полный прогон — `--full` CLI / `?full=true` API (смена чанкера/модели);
+- загрузка ТОЛЬКО сохраняет XML в каталог корпуса (валидация: расширение .xml, лимит
+  `APP_INGEST_MAX_UPLOAD_MB`, санитизация имени, аудит) — прогон запускается отдельно;
+- монтирование корпуса в compose и corpus-pvc в helm переводятся на rw (нужно для upload);
+- minikube: новые образы — через Docker Hub с новым тегом (vvsem/graphrag-*).
+
+Чек-лист выполнения:
+
+**A. План и миграция**
+- [ ] этот раздел зафиксирован в PLAN.md
+- [ ] миграция `0004_ingest_files` + модель `IngestFile`
+
+**B. Инкрементальный pipeline**
+- [ ] чистая функция `plan_incremental()` (категории unchanged/changed/new/removed) + unit
+- [ ] skip-логика в `run_ingestion`: unchanged → граф без эмбеддингов/LLM; changed/new → полный путь
+- [ ] `Neo4jWriter.delete_act` (DETACH DELETE + сироты Concept/Topic) + зачистка removed
+- [ ] CLI `--full`; `IngestStats`: files_skipped/added/changed/removed → `/admin/ingest/status`
+
+**C. Инфраструктура**
+- [ ] compose: `CORPUS_HOST_DIR:-../corpus_test` + rw-маунт; `.env.example`
+- [ ] helm values: corpus-pvc rw (upload работает и в k8s)
+
+**D. API и UI**
+- [ ] dep python-multipart; `POST /admin/documents` (multipart, .xml only, лимит MB, аудит, 409 при прогоне)
+- [ ] AdminPage: upload (multiple) → подсказка «запустите ingestion»; openapi-export + api-types.ts
+
+**E. Тесты и приёмка**
+- [ ] unit: plan_incremental, upload-валидация, сироты Concept
+- [ ] integration: прогон-2 без изменений = skip всех; add/change/remove файла
+- [ ] Postman: upload + негативы (не-xml, viewer 403, 409)
+- [ ] make lint + pytest зелёные (с таймаутами)
+- [ ] проверка compose (docker compose up) и minikube (новый тег образа из Docker Hub)
+
+**F. Документация**
+- [ ] backend/README: правила корпуса (APP_INGEST_CORPUS_DIR, инкрементальность, --full, CLI)
+- [ ] infra/README: CORPUS_HOST_DIR, rw, сценарий «докинул XML → Ingest», upload-эндпоинт
+- [ ] docs/minikube-deployment.md: пополнение корпуса на PVC (kubectl cp / init-Job), upload через ingress
+- [ ] root README: блок «Работа с корпусом» (3 способа пополнения)
+- [ ] бэклог п.1–3 отмечен закрытым
+
 ### [ ] Этап 11. Финализация
 **Deliverables:** README (быстрый старт compose + minikube), видео-скрипт 5–7 мин (граф в Neo4j Browser, трейсы Jaeger/Langfuse, RBAC-демо), финальный полный прогон всех тестов, чистка `.env.example` от секретов.
 **Acceptance:** репо самодостаточно для проверки преподавателем.

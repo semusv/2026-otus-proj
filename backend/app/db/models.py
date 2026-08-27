@@ -128,3 +128,21 @@ class IngestionRun(Base):
     files_total: Mapped[int] = mapped_column(Integer, default=0)
     chunks_done: Mapped[int] = mapped_column(Integer, default=0)
     stats: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class IngestFile(Base):
+    """Снапшот файла корпуса последнего успешного прогона (инкрементальный режим).
+
+    filename -> sha256 содержимого; act_ids/chunks_count нужны для зачистки
+    удалённых из каталога файлов (Qdrant/Neo4j) и статистики.
+    """
+
+    __tablename__ = "ingest_files"
+
+    filename: Mapped[str] = mapped_column(String(255), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    act_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    chunks_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
