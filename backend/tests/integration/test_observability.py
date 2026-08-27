@@ -23,9 +23,11 @@ pytestmark = pytest.mark.integration
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 # httpcore резолвит *.localhost в ::1, а порты забинжены на 127.0.0.1 ->
 # ходим по IP с явным Host-заголовком (Traefik маршрутизирует по нему)
-JAEGER_HOST = "jaeger.localhost"
 API_HOST = "api.localhost"
 LOCAL = "http://127.0.0.1"
+# Jaeger: с этапа 10 observability - ОТДЕЛЬНЫЙ compose-проект вне Traefik,
+# API публикуется на 127.0.0.1:16686 (этап-7 маршрутизация jaeger.localhost упразднена)
+JAEGER_BASE = "http://127.0.0.1:16686"
 
 
 def _host_headers(host: str) -> dict[str, str]:
@@ -116,7 +118,7 @@ async def test_logs_contain_user_id_after_auth(itg_client) -> None:
 
 @pytest.mark.timeout(60)
 async def test_jaeger_trace_found_by_x_trace_id() -> None:
-    """E2E против живого стека: X-Trace-Id -> трейс в Jaeger (Traefik -> collector).
+    """E2E против живого стека: X-Trace-Id -> трейс в Jaeger (collector -> Jaeger API).
 
     Пропуск, если observability-стек не поднят (make test-integration не падает).
     """
@@ -124,8 +126,7 @@ async def test_jaeger_trace_found_by_x_trace_id() -> None:
     try:
         try:
             probe = await asyncio.wait_for(
-                probe_client.get(f"{LOCAL}/api/services",
-                                 headers=_host_headers(JAEGER_HOST)),
+                probe_client.get(f"{JAEGER_BASE}/api/services"),
                 timeout=5,
             )
             backend_probe = await asyncio.wait_for(
@@ -133,9 +134,9 @@ async def test_jaeger_trace_found_by_x_trace_id() -> None:
                 timeout=5,
             )
         except Exception:
-            pytest.skip("Живой стек (traefik/jaeger/backend) недоступен")
+            pytest.skip("Живой стек (jaeger/backend) недоступен")
         if probe.status_code != 200 or backend_probe.status_code != 200:
-            pytest.skip("Живой стек (traefik/jaeger/backend) недоступен")
+            pytest.skip("Живой стек (jaeger/backend) недоступен")
     finally:
         await probe_client.aclose()
 
@@ -151,8 +152,7 @@ async def test_jaeger_trace_found_by_x_trace_id() -> None:
         found = False
         for _ in range(30):  # BatchSpanProcessor ~5s; до ~45s на экспорт+индексацию
             await asyncio.sleep(1.5)
-            r = await client.get(f"{LOCAL}/api/traces/{trace_id}",
-                                 headers=_host_headers(JAEGER_HOST))
+            r = await client.get(f"{JAEGER_BASE}/api/traces/{trace_id}")
             if r.status_code == 200 and r.json().get("data"):
                 found = True
                 span_names = {s["operationName"] for s in r.json()["data"][0]["spans"]}
