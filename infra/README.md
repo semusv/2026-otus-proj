@@ -9,7 +9,8 @@ Docker Compose стек платформы. Всё поднимается одн
 | Сервис | Образ | Зачем | Доступ |
 |---|---|---|---|
 | traefik | traefik:v3.7.11 | API Gateway / reverse proxy, роутинг по поддоменам | http://traefik.localhost/dashboard/ ; порт `APP_TRAEFIK_HTTP_PORT` (80) |
-| backend | graphrag/backend:stage2 (сборка из `../backend`) | Заглушка FastAPI: `/health`, `/metrics` | http://api.localhost/health ; 127.0.0.1:`APP_BACKEND_PORT` (8000) |
+| backend | graphrag/backend:stage11.0 (сборка из `../backend`) | FastAPI: auth, чат (SSE), admin/ingest, health/metrics | http://api.localhost/docs (Swagger) ; 127.0.0.1:`APP_BACKEND_PORT` (8000) |
+| frontend | graphrag/frontend:stage11.0 (сборка из `../frontend`) | React SPA (Vite+TS) в nginx; статика + прокси `/api`,`/auth`,`/admin` | http://localhost |
 | postgres | postgres:16-alpine | Пользователи/роли/сессии/аудит (этап 3+) | 127.0.0.1:`APP_POSTGRES_PORT` (5432), БД `graphrag` |
 | qdrant | qdrant:v1.19.0 | Векторная БД (чанки + эмбеддинги, этап 4+) | 127.0.0.1:`APP_QDRANT_HTTP_PORT` (6333), дашборд `/dashboard`; gRPC 6334 |
 | neo4j | neo4j:5.26.30-community | Граф знаний Act/Authority/Topic/Concept (этап 4+) | Browser: http://neo4j.localhost , логин `neo4j` / `APP_NEO4J_PASSWORD`; bolt 7687 |
