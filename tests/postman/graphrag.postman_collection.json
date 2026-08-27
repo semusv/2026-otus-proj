@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b7e2c1a0-0000-4a1a-9f00-graphrag00009",
     "name": "GraphRAG Platform — E2E (этапы 3–10)",
-    "description": "Полный сквозной сценарий (gate этапа 10):\n00-system: health/metrics/trace-echo\n10-auth: логин, ошибки аутентификации\n20-users: управление учётками, RBAC-инварианты ролей, жизненный цикл (deactivate/reactivate/delete)\n25-acts: контент актов ACL, управление грифом (clearance) в Neo4j+Qdrant\n30-ingest: статус ingestion (read-only), 401/403\n35-documents: upload/delete XML в корпус (валидация, RBAC; файл в конце удаляется)\n40-chat-rbac: чат non-stream/SSE, память диалога, ACL на цитатах, injection, чужая сессия\ningest-run: ОПЦИОНАЛЬНЫЙ запуск ingestion (в gate не входит: полный прогон жжёт CPU 10–30 мин)\n\nЗапуск: make test-postman (scripts/run_postman.ps1|.sh, newman).\nБазовый URL по умолчанию — Traefik http://api.localhost.",
+    "description": "Полный сквозной сценарий (gate этапа 10):\n00-system: health/metrics/trace-echo\n10-auth: логин, ошибки аутентификации\n20-users: управление учётками, RBAC-инварианты ролей, жизненный цикл (deactivate/reactivate/delete)\n25-acts: контент актов ACL, управление грифом (clearance) в Neo4j+Qdrant\n30-ingest: статус ingestion (read-only), 401/403\n35-documents: upload/delete XML в корпус (валидация, RBAC; файл в конце удаляется)\n35-documents: upload/delete XML в корпус (валидация, RBAC; файл в конце удаляется)\n35-documents: upload/delete XML в корпус (валидация, RBAC; файл в конце удаляется)\n40-chat-rbac: чат non-stream/SSE, память диалога, ACL на цитатах, injection, чужая сессия\ningest-run: ОПЦИОНАЛЬНЫЙ запуск ingestion (в gate не входит: полный прогон жжёт CPU 10–30 мин)\n\nЗапуск: make test-postman (scripts/run_postman.ps1|.sh, newman).\nБазовый URL по умолчанию — Traefik http://api.localhost.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -1754,6 +1754,74 @@
       "name": "35-documents",
       "item": [
         {
+          "name": "Login viewer (35-documents)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseURL}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\"username\":\"viewer\",\"password\":\"viewer123\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenViewer\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login admin (35-documents)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseURL}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\"username\":\"admin\",\"password\":\"admin123\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"adminToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Viewer загружает документ -> 403",
           "request": {
             "method": "POST",
@@ -1775,7 +1843,7 @@
                   "language": "text"
                 }
               },
-              "raw": "--pbGraphragDocs\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_postman_upload.xml\"\nContent-Type: text/xml\n\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\n--pbGraphragDocs--\n"
+              "raw": "--pbGraphragDocs\r\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_postman_upload.xml\"\r\nContent-Type: text/xml\r\n\r\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\r\n--pbGraphragDocs--\r\n"
             }
           },
           "event": [
@@ -1808,7 +1876,7 @@
                   "language": "text"
                 }
               },
-              "raw": "--pbGraphragDocs\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_postman_upload.xml\"\nContent-Type: text/xml\n\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\n--pbGraphragDocs--\n"
+              "raw": "--pbGraphragDocs\r\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_postman_upload.xml\"\r\nContent-Type: text/xml\r\n\r\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\r\n--pbGraphragDocs--\r\n"
             }
           },
           "event": [
@@ -1845,7 +1913,7 @@
                   "language": "text"
                 }
               },
-              "raw": "--pbGraphragDocs\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_notes.txt\"\nContent-Type: text/plain\n\nне xml\n--pbGraphragDocs--\n"
+              "raw": "--pbGraphragDocs\r\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_notes.txt\"\r\nContent-Type: text/plain\r\n\r\nне xml\r\n--pbGraphragDocs--\r\n"
             }
           },
           "event": [
@@ -1886,7 +1954,7 @@
                   "language": "text"
                 }
               },
-              "raw": "--pbGraphragDocs\nContent-Disposition: form-data; name=\"files\"; filename=\"../qa_evil.xml\"\nContent-Type: text/xml\n\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\n--pbGraphragDocs--\n"
+              "raw": "--pbGraphragDocs\r\nContent-Disposition: form-data; name=\"files\"; filename=\"../qa_evil.xml\"\r\nContent-Type: text/xml\r\n\r\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\r\n--pbGraphragDocs--\r\n"
             }
           },
           "event": [
@@ -1927,7 +1995,7 @@
                   "language": "text"
                 }
               },
-              "raw": "--pbGraphragDocs\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_postman_upload.xml\"\nContent-Type: text/xml\n\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\n--pbGraphragDocs--\n"
+              "raw": "--pbGraphragDocs\r\nContent-Disposition: form-data; name=\"files\"; filename=\"qa_postman_upload.xml\"\r\nContent-Type: text/xml\r\n\r\n<?xml version=\"1.0\" ?><act><body><textIPS>postman</textIPS></body></act>\r\n--pbGraphragDocs--\r\n"
             }
           },
           "event": [
