@@ -52,3 +52,6 @@ __pycache__/
 .venv/
 # load test / newman artifacts (этап 9)
 scripts/load_test/results/
+
+# scratch files
+tmp_*
